@@ -19,6 +19,9 @@ class AdbControlReceiver : BroadcastReceiver() {
         val rt = GatewayRuntime.get(context)
         when (val op = intent.getStringExtra("op")) {
             "status" -> rt.statusReport().lines().filter { it.isNotBlank() }.forEach { AppLog.i("status: $it") }
+            "direct-ready" -> setResultData(if (runCatching { rikka.shizuku.Shizuku.pingBinder() && rikka.shizuku.Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED }.getOrDefault(false) && !rt.settings.takeover && !rt.health.value.loopbackTest) "DTP1 ready" else "DTP1 unavailable")
+            "direct-start" -> context.startForegroundService(Intent(context, DirectPcmService::class.java))
+            "direct-stop" -> context.stopService(Intent(context, DirectPcmService::class.java))
             "setup" -> rt.runSetup()
             "sip-restart" -> rt.restartSip()
             "loopback" -> rt.setLoopbackTest(intent.getBooleanExtra("on", true))
