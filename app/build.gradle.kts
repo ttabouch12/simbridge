@@ -10,7 +10,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "io.github.sparkcyf.voicesipagent"
+        applicationId = "io.github.sparkcyf.voicesipagent.wideband"
         minSdk = 30
         targetSdk = 36
         versionCode = 103

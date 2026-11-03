@@ -106,7 +106,7 @@ class GatewayRuntime private constructor(context: Context) {
 
     val shizuku = ShizukuConnector(app) { AppLog.i(it) }
     // Built-in Kotlin SIP stack is G.711 (narrowband) only.
-    private fun audioFormat() = PcmFormat.NARROWBAND
+    private fun audioFormat() = if (_health.value.loopbackTest) PcmFormat.WIDEBAND else PcmFormat.NARROWBAND
 
     val cellular = CellularEndpoint(app,
         PrivilegedAudioOpener(shizuku, { settings.audioMethod }, { settings.muteEarpiece }, ::audioFormat),

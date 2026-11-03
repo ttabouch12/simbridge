@@ -16,7 +16,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  * after boot via wireless debugging), checks permission, binds [PrivilegedService] and reports
  * every transition so the app can re-run setup when the service (re)connects.
  */
-class ShizukuConnector(context: Context, private val log: (String) -> Unit) {
+class ShizukuConnector(context: Context, private val userServiceTag: String = "vsa-privileged", private val log: (String) -> Unit) {
     enum class State { STOPPED, SHIZUKU_NOT_RUNNING, PERMISSION_REQUIRED, PERMISSION_DENIED, BINDING, CONNECTED, ERROR }
 
     fun interface Listener {
@@ -37,7 +37,7 @@ class ShizukuConnector(context: Context, private val log: (String) -> Unit) {
         .daemon(false)
         .processNameSuffix("shell")
         .debuggable(false)
-        .tag("vsa-privileged")
+        .tag(userServiceTag)
         // Restart the shell process whenever a new APK is installed so it never runs stale code.
         .version((app.packageManager.getPackageInfo(app.packageName, 0).lastUpdateTime / 1000 % Int.MAX_VALUE).toInt())
 
