@@ -9,3 +9,7 @@ One ADB shell/root peer may connect to abstract socket `${applicationId}.pcm`. N
 Validation: app assembleDebug and gateway/voice-api unit tests passed. Installed on moto g52j 5G Android 12. ADB connection and independent Shizuku helper confirmed; an idle-phone connection was rejected with audio mode=0, and the service/helper/forward were released. Live outgoing PCM transport and audio quality remain unverified. Earlier in-device 16 kHz echo success is not evidence of host transport quality. No call was placed for this smoke test.
 
 The upstream app-wide test task still has missing pjsua2 class references in GatewayRuntimeLifecycleTest. The external host transport has seven offline tests, including sample preservation at low amplitudes. G.722 and AI integration are not added here.
+
+## 2026-11-03 saved baseline
+
+Subsequent outgoing host tests completed at 16 kHz. TCP_NODELAY and a 120ms host playback lead reduced intermittent cuts subjectively; both changes were applied together. Lower-level human speech was reported clear enough that distortion/cuts were not bothersome. A 20s session had 1000 frames each way, no backend failure, and final IDLE confirmation. Eight tones from 125Hz through 6kHz were audible, but this is not a calibrated response or cellular codec identification. Hiss reported once was not reproduced in a normal/zero-PCM/normal comparison; no denoising was added. Full details and the remaining AI integration work are in android-call-bridge/DIRECT_TELEPHONY.md. No recordings, destination numbers, or external sample WAVs are committed.
