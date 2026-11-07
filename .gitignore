@@ -1,4 +1,8 @@
 # Secrets — never commit
+signing.properties
+*.jks
+*.keystore
+local.gradle.kts
 sip_secret
 *.secret
 secrets/

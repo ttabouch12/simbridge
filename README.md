@@ -1,327 +1,286 @@
-# voice-sip-agent-selfhost - a "device-in-itself" phone gateway, no root (Android 13+)
+# SimBridge
 
-> 🇷🇺 **[Русская версия →](README.ru.md)** (fuller, with the project's own notes) ·
-> 🇬🇧 English (this file). Original project README: [`README.upstream.md`](README.upstream.md).
+**Use your phone's SIM on another phone, over Wi-Fi. No root, no server, no cloud.**
 
-> 👉 **New here?** A plain-language, from-scratch step-by-step guide (install this, enable that,
-> forward ports) is in [`docs/КАК-НАСТРОИТЬ.md`](docs/КАК-НАСТРОИТЬ.md) (Russian).
+SimBridge turns an Android phone that holds a SIM card (the **SIM phone**) into a pocket gateway for a
+second Android phone without a SIM (the **main phone**). Calls and texts on the SIM's number are relayed
+to the main phone, and the main phone makes calls and sends texts through the SIM, either over the SIM
+phone's own hotspot or over any Wi-Fi network the two phones share.
 
-## Documentation map
+On the main phone it feels native. Calls ring in the **system Phone app**, with its call screen, call
+history, contact names and keypad. Texts appear in a Google Messages-style app, and can optionally be
+copied into your **default Messages app** too.
 
-- **For users:** [`docs/КАК-НАСТРОИТЬ.md`](docs/КАК-НАСТРОИТЬ.md) - the single page that's enough
-  to set everything up from scratch (Russian).
-- **Reference:** [app settings](docs/settings-ru.md) · [baresip client](docs/client-baresip.md) ·
-  [Shizuku after a reboot](docs/shizuku-reboot.md) · [internet and security](docs/internet-security.md).
-- **For developers:** [building the APK](#building-the-apk).
+[**⬇ Download the latest release**](../../releases/latest) ·
+[How it works](#how-it-works) · [Setup](#setup) · [FAQ & troubleshooting](#troubleshooting) ·
+[Disclaimer](DISCLAIMER.md)
 
-A fairly recent old Android phone with your SIM sits at home on a charger and Wi-Fi. The incoming
-**voice calls and SMS** that arrive on its number are relayed to your phone over the internet -
-wherever you are. **No PC, no Asterisk, no external server:** the SIP server is built into the app.
-**No root required.**
-
-```
-Caller ──GSM/VoLTE──► Gateway phone (SIM + app)
-                         ├─ built-in SIP registrar :5062 ◄─REGISTER─ softphone (anywhere)
-                         ├─ answers the call itself, call audio ↔ SIP (RTP)
-                         └─ incoming SMS → SIP MESSAGE ──────────► softphone chat
-```
-
-This is **track A** of the larger "переадресация" project. Track B (a fork of
-[gsm2sip](https://github.com/pulpoff/gsm2sip), **with root**, old Qualcomm phones below
-Android 13, such as the Samsung S4 mini) lives in the separate `gsm2sip-selfhost` repository.
-
-The key to doing this without root: since **Android 13** the system has a standard but hidden
-call-audio interception mechanism (`TELEPHONY_TX`/`TELEPHONY_RX`). Access is granted by **Shizuku**,
-started once with a debugging command.
+<p align="center">
+  <img src="docs/images/simbridge-gateway.png" width="280" alt="SimBridge Gateway on the SIM phone">
+  &nbsp;&nbsp;
+  <img src="docs/images/simbridge-settings.png" width="280" alt="SimBridge settings on the main phone">
+</p>
 
 ---
 
-## Who it's for
+## Why?
 
-Your home number (SIM) anchors your bank, government services, 2FA codes, and calls from family
-and services - carrying it around is both inconvenient and risky. This gateway keeps the SIM
-**at home** and delivers its calls and SMS to you over the internet, on any phone, wherever you are.
+Some people want to carry one phone but can't, or don't want to, put their SIM in it. For example:
 
-- **Vacation / business trip.** No roaming, no missed incoming on your home number, no changing
-  numbers. On the road your phone carries a local eSIM or a second SIM for data only; the home SIM
-  stays in the gateway at home.
-- **Long relocation / living abroad** (expat, student, rotational work). Your home number stays
-  "alive" and tied to your accounts while you are in another country: bank calls and SMS codes
-  arrive as before.
-- **Safety on the street.** If your phone is stolen or snatched in an unfamiliar city, the home SIM
-  **isn't in it** - it's at home. The thief gets no access to your number, can't intercept SMS
-  codes, can't reset passwords by SMS, and can't reach SIM-bound accounts or your bank. The stolen
-  phone holds only a local data eSIM or an "empty" second SIM with no important bindings.
-- **Privacy and control.** A "device-in-itself": the SIP server lives inside the gateway phone,
-  audio and messages go straight to your softphone - no clouds, no third-party servers.
+- **Your main phone can't use your local mobile network.** It may be an imported or travel phone that
+  isn't registered for use in your country, or one that lacks your carrier's bands. Keep the SIM in a
+  cheap, compatible phone in your bag. That phone shares its mobile data as a hotspot and relays calls
+  and texts. Your main phone uses only Wi-Fi.
+- **Two numbers, one phone in hand.** Leave a second line (work, home country, a local tourist SIM) in
+  a spare phone and still answer it from your main phone.
+- **A home line that follows you around the house.** Leave the SIM phone on a charger where reception
+  is best, and use the main phone anywhere on your home Wi-Fi.
 
-**For:** travelers and digital nomads, expats, rotational workers, students abroad; anyone who
-keeps an "anchor" number for banks and government services and doesn't want to carry it; and anyone
-who values privacy (no external server).
+> **The motivating setup:** a SIM phone (a Samsung Galaxy A56) lives in a bag, plugged into a power
+> bank, with its hotspot on. A Pixel 9 with **no SIM** joins that hotspot for internet. SimBridge rings
+> the Pixel's own Phone app for calls to the SIM's number, sends texts both ways, and the A56's screen
+> never turns on.
 
----
+SimBridge does **not** modify IMEIs, clone SIMs, or connect the main phone to any cellular network. The
+main phone only ever uses Wi-Fi. See the [disclaimer](DISCLAIMER.md).
 
-## What already works
+## Features
 
-Verified on a **Nubia NX769J (Android 16)** paired with the baresip client:
-
-- ✅ Incoming GSM call to the gateway's SIM → the softphone rings on the other phone, **two-way
-  audio** (needs the **"Direct telephony"** capture method - see [settings](docs/settings-ru.md), §4.4).
-- ✅ Built-in SIP registrar: the softphone registers straight to the gateway phone.
-- ✅ Incoming **SMS** → arrives in the softphone chat.
-- ✅ Self-recovery: after the app restarts, the link comes back within ≤2 minutes.
-- ✅ All settings are **in the app itself** (RU/EN), each item has an ⓘ explanation.
-- ✅ Doze resilience: the service holds a wakelock while the gateway is on, so the phone doesn't drop
-  the registration while asleep, even on aggressive OEM ROMs (0.2.0-selfhost4).
-
-Not done yet: outgoing calls/SMS from the far phone over the gateway's SIM; wideband audio
-(currently G.711). Working outside a single Wi-Fi needs a public IP (see below).
-
-> ⚠ **The capture method depends on the phone model.** On the Nubia it's "Direct telephony"; the
-> automatic mode chose wrong (no audio). Another phone may need "Call redirection". How to tell -
-> [`docs/settings-ru.md`](docs/settings-ru.md), §4.4.
->
-> ⚠ **A foreign VPN on the gateway phone breaks registration** - it wraps SIP into the tunnel and
-> the softphone hangs on connect. Turn off any VPN on the gateway phone.
->
-> ⚠ **Without root, Shizuku dies on a phone reboot** - it must be restarted. This is track A's main
-> operational caveat, see [the section below](#shizuku-after-a-reboot).
-
----
-
-## How this fork differs from upstream
-
-Stock [android-voice-sip-agent](https://github.com/sparkcyf/android-voice-sip-agent) registers to an
-**external** PBX. This fork adds:
-
-- a **built-in registrar** ("device-in-itself"): the app accepts REGISTER on `:5062` itself, no
-  external PBX needed (on by default);
-- **forwarding of incoming SMS** to SIP (`MESSAGE`);
-- a **configurable registration lease** (`registrarLeaseSec`, default 600 s) with the last contact
-  held for ~2× the lease - brief background sleeps on the softphone don't drop the link;
-- a **Russian/English UI** with ⓘ explanations and an FAQ section;
-- a **wakelock** held while the gateway runs, so Doze on an aggressive ROM can't suspend the SIP
-  reader thread;
-- a build **without native pjsip**: by default a pure-Kotlin SIP stack is used (**UDP only, G.711
-  codec**). This also matters for [licensing](#license-and-credits): the default build statically
-  links **no** pjsip/OpenSSL/libopus.
-
----
-
-## Gateway phone requirements
-
-- **Android 13 or newer**, **arm64** CPU.
-- A **Qualcomm or MediaTek** chip with a call-audio route (checked by one command, below).
-  **Exynos (Samsung)** and carrier-locked phones (Verizon, etc.) are **not** suitable.
-- A voice SIM; stable Wi-Fi; permanent charging.
-- A dedicated phone with no personal data: it lives with debugging and Shizuku enabled.
-
-### Suitability check (no install, over USB)
-
-```bash
-adb shell getprop ro.build.version.release                 # need >= 13
-adb shell getprop ro.product.cpu.abi                       # need arm64-v8a
-adb shell "dumpsys media.audio_policy | grep -E 'TELEPHONY_TX|TELEPHONY_RX'"
-```
-If the last command shows both lines - the phone is a candidate. Final confirmation comes from the
-app (`pstn_interceptable=true`) and a live call.
-
----
-
-## Which phone to pick
-
-- Android 13+ (almost any phone from 2023 on), **arm64**, **Qualcomm (Snapdragon)** or
-  **MediaTek (Dimensity/Helio)**.
-- **NOT** Exynos (Samsung) and **NOT** tablet/"Go" chips without telephony.
-- No carrier lock (SIM-free / "international" version).
-- The cheaper the better - it's a dedicated "duty" phone on a charger.
-
-If you're willing to root the phone, root removes track A's only drawback (see
-[Shizuku](#shizuku-after-a-reboot)): on a rooted phone Shizuku starts itself after a reboot. Phones
-that root well: Pixel, Xiaomi/Redmi/POCO, Motorola, OnePlus, Nothing; poorly - Samsung, carrier
-units, many Transsion.
-
-**Triage script** - `triage/check-phone.sh` in the larger project: `bash check-phone.sh` over USB
-gives "CANDIDATE/NOPE", the working audio method, bootloader state, and the recommended track (A/B).
-
----
-
-## Installing on the gateway phone
-
-> 📦 **Prebuilt files are in [Releases](https://github.com/Hinduc0der/voice-sip-agent-selfhost/releases):**
-> the `voice-sip-agent-selfhost-*.apk` installs directly - building is optional (see
-> [Building the APK](#building-the-apk)). Get Shizuku from its own [Releases](https://github.com/RikkaApps/Shizuku/releases).
-
-1. Enable Developer options → USB debugging, connect to a PC, allow debugging.
-2. Install **Shizuku** (patched one on MediaTek/Xiaomi/Android 16, where the normal build crashes):
-   ```bash
-   adb install shizuku.apk
-   ```
-3. Install the gateway app:
-   ```bash
-   adb install voice-sip-agent-selfhost.apk
-   ```
-4. Start Shizuku (**repeat after every phone reboot**, see [the section](#shizuku-after-a-reboot)):
-   ```bash
-   P=$(adb shell pm path moe.shizuku.privileged.api | sed 's/package://;s/base.apk//' | tr -d '\r')
-   adb shell "${P}lib/arm64/libshizuku.so"
-   ```
-   Without a PC, Shizuku starts via "Wireless debugging" on the phone itself.
-5. Open the app → **Grant Shizuku** → "Always allow".
-6. Grant permissions (the app asks itself; via adb):
-   ```bash
-   adb shell pm grant io.github.sparkcyf.voicesipagent android.permission.READ_PHONE_NUMBERS
-   adb shell pm grant io.github.sparkcyf.voicesipagent android.permission.RECEIVE_SMS
-   ```
-7. **Server mode is on by default.** Find the gateway's IP:
-   ```bash
-   adb shell "ip -4 addr show wlan0 | grep -o 'inet [0-9.]*'"
-   ```
-   The port is **5062/UDP** (default).
-8. **Turn off battery optimization** for the app and Shizuku (especially ZTE/Nubia/Xiaomi), or the
-   ROM will kill the process.
-
----
-
-## App settings
-
-Everything is configured **in the app** (RU/EN toggle at the top, an ⓘ on each item). The only
-value that really differs from phone to phone is the **capture method ("Cellular audio")**: if the
-call connects but people can't hear each other, flip exactly that.
-
-![Main screen](docs/images/ru-01b-registered.png)
-
-**The full settings reference with screenshots** - [`docs/settings-ru.md`](docs/settings-ru.md)
-(Russian).
-
-Short version for "device-in-itself" mode:
-
-| Item | Value |
+| | |
 |---|---|
-| Device-in-itself mode (built-in SIP server) | **on** (default) - PBX fields can stay empty |
-| Local SIP port | **5062** |
-| Registration lease | **600 s** (raise to 1200 if registration keeps expiring) |
-| Cellular audio | **Direct telephony** on the Nubia; otherwise try Call redirection (§4.4) |
+| 📞 **Calls in the system Phone app** | Incoming calls ring with the normal call screen, contact name and ringtone. Outgoing calls go from the Phone app's keypad or contacts. Calls appear in the call history. |
+| 🔢 **Keypad tones (DTMF)** | Press numbers during a call to navigate phone menus (language selection, "press 1 for…"). |
+| 💬 **Texts (SMS)** | A Google Messages-style app: conversations, contact photos, bubbles, notifications with **Reply** and **Mark as read**, and send status ("Sent" / "Not sent · tap to retry"). |
+| 📥 **Default Messages app (optional)** | Relayed texts can also be copied into Android's SMS database, so they appear in Google Messages or your default SMS app. |
+| 🔍 **Finds the SIM phone automatically** | Uses mDNS/DNS-SD (`_simbridge._udp`), plus the hotspot's gateway address. Works on home Wi-Fi and on the SIM phone's hotspot. No IP addresses to type, and it reconnects after network changes. |
+| 🔒 **Password protected** | SIP digest authentication, IP-locked calls and texts, and brute-force lockout. Only your main phone can use the SIM. |
+| 🌙 **Quiet SIM phone** | While the main phone is connected, the SIM phone shows no call screen, its screen stays off, and its earpiece is muted. |
+| 🔋 **Power saver mode** | One switch on the SIM phone turns off Bluetooth, location and scanning, and puts every other app to sleep. Turning it off restores everything exactly. |
+| 🔁 **Survives reboots** | Starts by itself. Status messages ("SIM phone restarted", "Shizuku stopped", "battery low", "unplugged") arrive as texts from "SimBridge Gateway". |
+| 🚫 **No root, no server** | Everything runs on the two phones. Nothing goes through the internet unless you set that up yourself. |
 
----
+## How it works
 
-## Recommended client - baresip
-
-The far phone needs a SIP softphone. We recommend
-**[baresip](https://f-droid.org/packages/com.tutpro.baresip/)** (`com.tutpro.baresip`, F-Droid): a
-free libre client that holds several accounts and always sends page-mode `MESSAGE` (important for
-SMS; **Linphone 6.2.x won't send outgoing SMS**).
-
-Quick setup: ⋮ → "Accounts" → `sip:s23@<gateway-IP>:5062` → "+" → enable "Register". No
-password/proxy needed. **The `:5062` port is mandatory right in the AoR**, or everything goes to
-`:5060`.
-
-Full client guide (two SIMs → one softphone, SMS replies, alternatives) -
-[`docs/client-baresip.md`](docs/client-baresip.md) (Russian).
-
----
-
-## Shizuku after a reboot
-
-The call-audio interception needs debugging-level rights (Shizuku). **On a non-root phone Shizuku
-dies on every reboot** - and the gateway stops working until Shizuku is restarted (cable or wireless
-debugging). For the "sits at home while I travel" role this is the main risk.
-
-- **Root solves it cleanly:** Shizuku's "Start on boot" (**root only**) brings it up right after
-  power-on, no PC. Plus app auto-start and a battery exemption → a **fully unattended gateway**.
-- **Without root:** either don't reboot the phone, or keep a small always-on PC/SBC nearby that runs
-  the start command over USB/Wi-Fi-adb at boot.
-
-Commands, paths and diagnostics - [`docs/shizuku-reboot.md`](docs/shizuku-reboot.md) (Russian).
-(Deep sleep *while running* is already handled by the wakelock since 0.2.0-selfhost4; only the
-after-reboot start remains.)
-
----
-
-## Going to the internet, and security
-
-In one Wi-Fi it just works. To reach the gateway "from the road" it must be reachable from the
-internet. **The path is direct access:** a public IP at home plus forwarding of the SIP port and
-RTP (**1:1, same port numbers**), with the gateway itself closed off by the registrar password.
-
-> ⛔ An open SIP port is a toll-fraud risk. The gateway is protected by a **SIP registrar password**
-> (digest authentication, RFC 2617/3261, MD5): a missing or wrong password is rejected with 401, and
-> **brute-force protection** bans an IP for 10 minutes after 5 failed attempts in 60 seconds. The
-> password is stored in the Android Keystore (AES-GCM, realm `voice-sip-agent`). An **empty password
-> disables authentication** (local network only) - for the internet a password is mandatory. A
-> non-standard port is camouflage, not protection; **no VPN is needed.**
-
-Full step-by-step (direct access, the registrar password, security) -
-[`docs/internet-security.md`](docs/internet-security.md) (Russian).
-
----
-
-## Diagnostics (adb)
-
-```bash
-R=io.github.sparkcyf.voicesipagent/io.github.sparkcyf.voicesipagent.app.AdbControlReceiver
-adb shell am broadcast -n $R --es op status                       # state summary to the log
-adb shell am broadcast -n $R --es op sms-test --es from "+700..." --es text "hi"  # SMS test
-adb shell am broadcast -n $R --es op takeover --ez on false       # turn the gateway off
-adb logcat -s VoiceSipAgent VsaTap VsaPrivileged                  # gateway log
 ```
-In a call log the key lines: `both legs connected` and `media bridged` - audio joined; nonzero
-`levels downPeak/upPeak` on both sides = heard both ways (`upPeak=0` usually means the softphone
-wasn't granted the mic). All settings-over-adb are in
-[`docs/settings-ru.md`](docs/settings-ru.md), §7.
-
----
-
-## Building the APK
-
-JDK 17 and the Android SDK are required. pjsip/swig are **not** needed - the fork builds on the
-pure-Kotlin SIP stack.
-```bash
-cd voice-sip-agent-selfhost
-export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-17.0.20.101-hotspot"
-./gradlew :app:assembleDebug
-# APK: app/build/outputs/apk/debug/app-debug.apk
+┌────────────────────────────┐        Wi-Fi / SIM phone's hotspot        ┌─────────────────────────────┐
+│  SIM phone                 │ ◄──────────────────────────────────────► │  Main phone (no SIM)        │
+│  "SimBridge Gateway"       │     SIP over UDP (port 5062) + RTP audio  │  "SimBridge"                │
+│                            │     mDNS: _simbridge._udp                 │                             │
+│  cellular call ◄──► call   │                                           │  Telecom ConnectionService  │
+│  audio tap (via Shizuku)   │     INVITE / BYE / RFC 4733 DTMF          │   → system Phone app UI     │
+│  SMS in/out (SmsManager)   │     SIP MESSAGE (texts, status alerts)    │  Messages-style app         │
+│  built-in SIP registrar    │                                           │   (+ optional copy to the   │
+│                            │                                           │    system SMS database)     │
+└────────────────────────────┘                                           └─────────────────────────────┘
 ```
 
----
+- **SimBridge Gateway** (SIM phone) is a fork of
+  [voice-sip-agent](https://github.com/sparkcyf/android-voice-sip-agent) in its "device-in-itself"
+  configuration ([selfhost fork](https://github.com/yyano/voice-sip-agent-selfhost)). It answers and
+  places cellular calls, and bridges their audio to a built-in SIP server. Android 13+ lets a
+  privileged process capture and inject call audio (`CALL_AUDIO_INTERCEPTION` /
+  `CAPTURE_AUDIO_OUTPUT`). [Shizuku](https://github.com/RikkaApps/Shizuku) gives the app that
+  privilege, **without root**.
+- **SimBridge** (main phone) registers to the gateway with the same pure-Kotlin SIP stack. It
+  registers a calling account with Android's Telecom framework, so the system Phone app handles the
+  call UI. Audio goes through the main phone's microphone and earpiece, with echo cancellation.
 
-## Honest status and risks
+## Requirements
 
-- Incoming call (two-way audio), incoming SMS, built-in registrar - **confirmed** on the Nubia NX769J.
-- Outgoing calls/SMS from the far phone over the gateway's SIM - **not done**.
-- **The internet path is not yet tested live** - a single Wi-Fi only.
-- **Without root, Shizuku does not survive a reboot** - the main operational risk (above).
-- **Registrar authentication is implemented** (SIP digest password + brute-force ban); for the
-  internet, set a password - an empty password leaves `:5062` open.
+**SIM phone (gateway)**
+- Android **13 or newer**, with a SIM, **no root needed**.
+- [Shizuku](#downloads) running (wireless debugging; set once).
+- The phone's audio system must allow call audio capture. Many modern phones do. It works on a
+  **Samsung Galaxy A56 (Exynos 1580, Android 17, One UI)**. The upstream projects report it working
+  on a Google Pixel 11 Pro (Android 17), a Motorola (Android 16) and a Nubia NX769J (Android 16). If calls connect with no sound, see
+  [troubleshooting](#troubleshooting).
 
----
+**Main phone**
+- Android **14 or newer**. Tested on a **Google Pixel 9 (Android 17)**. The system Phone app must
+  support third-party calling accounts (Google Phone does).
+- Same Wi-Fi network as the SIM phone, **or** connected to the SIM phone's hotspot.
 
-## Support the project (donate)
+## Downloads
 
-Non-commercial, distributed directly (APK), not via app stores. If it's useful to you, you can
-**voluntarily** support development:
+From the [latest release](../../releases/latest):
 
-- **DonationAlerts:** [donationalerts.com/r/hinducoder](https://www.donationalerts.com/r/hinducoder)
+| File | Install on |
+|---|---|
+| `SimBridge-Gateway-<version>.apk` | the **SIM phone** |
+| `SimBridge-<version>.apk` | the **main phone** |
 
-> The donation is **entirely voluntary** and changes nothing: the app stays free under
-> GPL-2.0-or-later, all features work without paying, and the source is open. Not a purchase or
-> subscription.
+Also needed on the **SIM phone**: **Shizuku**, either of:
+- [Shizuku by thedjchi](https://github.com/thedjchi/Shizuku/releases) (**recommended**: adds *start on
+  boot*, a *watchdog* and TCP mode, so it restarts by itself after a reboot), or
+- the official [Shizuku by RikkaApps](https://github.com/RikkaApps/Shizuku/releases) /
+  [Google Play](https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api).
 
----
+Optional, for setup by cable: [Android platform-tools (adb)](https://developer.android.com/tools/releases/platform-tools).
 
-## License and credits
+## Setup
 
-A fork of [**sparkcyf/android-voice-sip-agent**](https://github.com/sparkcyf/android-voice-sip-agent).
-License - **GNU GPL, version 2 or later** (GPL-2.0-or-later; see [`LICENSE`](LICENSE)). Our changes
-are distributed under the same terms - the repository stays open.
+### 1. SIM phone
 
-Third-party note: upstream statically links pjsip (GPL-2.0-or-later), OpenSSL (Apache-2.0) and
-libopus (BSD-3-Clause) in release builds. **This fork builds on a pure-Kotlin SIP stack with no
-native pjsip by default**, so the default build does not include those libraries. Enabling the
-`pjsua2` stack brings their licenses back (see the note in [`README.upstream.md`](README.upstream.md)).
+1. **Enable Developer options:** Settings → About phone → Software information → tap *Build number*
+   7 times.
+2. **Install Shizuku** and start it with **Wireless debugging** (Shizuku shows the steps: Developer
+   options → Wireless debugging → *Pair device with pairing code*, then type the code into Shizuku's
+   notification). In thedjchi's Shizuku, also turn on **Start on boot** and **Watchdog**.
+   - On Android 17, allow Shizuku's *notifications* and *nearby devices / local network* prompts, or
+     pairing silently fails.
+3. **Install `SimBridge-Gateway.apk`** and open it. Tap **Allow Shizuku access → Allow all the time**.
+4. Allow every permission it asks for (phone, SMS, contacts, notifications).
+5. **Make it the default phone app** when asked, or later in Settings → Apps → Default apps → Phone
+   app → *SimBridge Gateway*. This lets it answer calls without the SIM phone's own call screen.
+   While the main phone is not connected, it shows a simple call screen on the SIM phone.
+6. Under **Security**, set a **password**. Use something long; the main phone needs it once.
+7. Leave **Forward calls & texts** on. Optional: **Keep this phone silent during calls** and
+   **Power saver**.
+8. Turn on **Mobile hotspot** if the main phone will use it for internet. If both phones are on the
+   same Wi-Fi, you don't need the hotspot.
 
-The original README is preserved as [`README.upstream.md`](README.upstream.md).
-Thanks to the author for the Shizuku-based call-audio interception - track A without root rests on it.
+Recommended: Settings → Battery → set SimBridge Gateway and Shizuku to **Unrestricted**. On Samsung,
+also add both to *Never sleeping apps*.
 
-**Credits.** The code was written by Claude (Anthropic) to the owner's tasks; the owner set the
-tasks and tested every build on a live device.
+### 2. Main phone
+
+1. **Install `SimBridge.apk`** and open it. Allow microphone, contacts, phone, notifications and
+   *nearby devices / local network*.
+2. Open **Settings** (⚙ in the search bar):
+   - **Gateway password:** enter the password from step 1.6 → *Save*. The status chip changes to
+     **Connected via Wi-Fi** or **Connected via hotspot**.
+   - **Calls in the Phone app:** tap *Open calling accounts* and turn on **SimBridge**. In Google
+     Phone this is Settings → Calling accounts → All calling accounts. If the main phone has no SIM of
+     its own, set SimBridge as the account to **make calls with**.
+   - **Stay connected in the background:** tap *Allow* (battery optimization exemption).
+3. That's it. Call from the Phone app as usual, and text from SimBridge.
+
+#### Optional: show texts in your default Messages app
+
+Android only lets the default SMS app write to the system message database. To let SimBridge copy
+relayed texts there as well, run once from a computer with the main phone connected over USB:
+
+```sh
+adb shell appops set io.github.simbridge WRITE_SMS allow
+```
+
+Then turn on *Settings → Show texts in your Messages app → Copy texts to Messages*. Texts you
+receive, and texts you send from SimBridge, then also appear in Google Messages or your default SMS
+app. Deleting a conversation in SimBridge removes its copies too.
+
+> **Replying from Google Messages doesn't work.** The main phone has no SIM, so the Messages app
+> has nothing to send through. Reply from SimBridge, or from its notification.
+
+#### Optional: set everything up over adb
+
+Useful for scripting or headless setups. The receivers only accept broadcasts from adb (they require
+the `DUMP` permission).
+
+```sh
+# SIM phone
+G=io.github.simbridge.gateway/io.github.sparkcyf.voicesipagent.app.AdbControlReceiver
+adb shell am broadcast -n $G --es op reg-password --es password 'YOUR-LONG-PASSWORD'
+adb shell am broadcast -n $G --es op takeover --ez on true
+adb shell cmd role add-role-holder android.app.role.DIALER io.github.simbridge.gateway 0
+adb shell am broadcast -n $G --es op provision --ei audio_method 2   # only if calls have no audio (see below)
+
+# Main phone
+P=io.github.simbridge
+adb shell am broadcast -n $P/.ControlReceiver --es op password --es password 'YOUR-LONG-PASSWORD'
+adb shell telecom set-phone-account-enabled $P/$P.GatewayConnectionService simbridge 0
+adb shell telecom set-user-selected-outgoing-phone-account $P/$P.GatewayConnectionService simbridge 0
+adb shell dumpsys deviceidle whitelist +$P
+```
+
+## Everyday use
+
+- **Calls:** dial from the Phone app, contacts, or the call button in a SimBridge chat. Incoming
+  calls ring like normal calls. Mute, speaker, Bluetooth and the keypad all work from the call
+  screen.
+- **Texts:** open SimBridge. *Start chat* picks a contact or takes a number. Reply straight from
+  notifications.
+- **Status:** the chip at the top of SimBridge shows the connection. The SIM phone texts you (as
+  *SimBridge Gateway*) if it restarted, Shizuku stopped, the battery is low or it was unplugged.
+- **After restarting the main phone**, open SimBridge once. Android only grants background
+  microphone access to an app that was opened since boot.
+- **After restarting the SIM phone**, everything restarts by itself, including Shizuku with
+  thedjchi's version (it needs Wi-Fi on once). You get a text when it's back.
+
+## Limitations
+
+- **Voice and SMS only.** No MMS, RCS, picture messages, or USSD codes.
+- **One main phone at a time.** The most recent phone to connect receives calls.
+- **Narrowband audio** (G.711, 8 kHz). It's normal phone-call quality, not HD voice.
+- **No call waiting or hold** for relayed calls.
+- **Local network only by default.** The phones must share a Wi-Fi network or the hotspot. Reaching
+  the gateway over the internet needs your own VPN (e.g. WireGuard/Tailscale). Don't expose port 5062
+  to the internet.
+- **Emergency calls** should be made from a phone with a SIM. Most phones can still place emergency
+  calls without a SIM. SimBridge never handles emergency numbers.
+- The SIM phone must stay **powered and in range**: it is the phone line.
+
+## Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| Main phone says *Looking for your SIM phone…* | Both phones on the same Wi-Fi (or main phone on the hotspot)? Is SimBridge Gateway open, with **Forward calls & texts** on? Check that the password matches. Some routers block mDNS or isolate devices: use the hotspot, or turn off "AP/client isolation". |
+| *The SIM phone rejected the password* | Re-enter the same password on both phones. After 5 wrong tries the gateway ignores that device for 10 minutes. |
+| Calls connect but **no sound** | On the SIM phone: SimBridge Gateway → ⚙ (top right) → **Cellular audio** → try *Direct telephony*, then *Call redirection*. Check that Shizuku is running. |
+| Calls don't ring on the main phone | Turn on the **SimBridge** calling account (main phone Settings → Calls in the Phone app). |
+| No microphone after a main-phone reboot | Open SimBridge once. |
+| Shizuku isn't running after a SIM-phone reboot | Use thedjchi's Shizuku with *Start on boot* + *Watchdog*, and keep Wi-Fi on. Otherwise open Shizuku and tap *Start*. |
+| SIM phone screen lights up during calls | Make SimBridge Gateway the **default phone app** on the SIM phone. |
+| Texts don't show in Google Messages | Run the `appops` command above and turn the option on. Only new texts are copied. |
+
+## Security & privacy
+
+- All traffic stays on your local network. SimBridge has no servers, accounts, analytics or ads.
+- SIP signalling and audio are **not encrypted** (plain SIP/RTP on the LAN). The password is never
+  sent in clear (digest auth). Only use SimBridge on networks you trust, such as your home Wi-Fi or
+  your own hotspot. Use a strong hotspot password.
+- Only the device that registered with the password can place calls or send texts, checked by IP.
+  Repeated wrong passwords are blocked.
+- Shizuku grants powerful system access to apps you approve. Only approve apps you trust.
+
+## Building from source
+
+Requirements: JDK 17, Android SDK (platform 37), and an internet connection for Gradle.
+
+```sh
+git clone https://github.com/ttabouch12/simbridge.git
+cd simbridge
+./gradlew :app:assembleDebug :phone:assembleDebug   # debug APKs
+./gradlew :app:assembleRelease :phone:assembleRelease  # release APKs (unsigned unless configured)
+```
+
+Modules: `app` (SimBridge Gateway), `phone` (SimBridge), `sip` (pure-Kotlin SIP/RTP stack, shared),
+`voice-api`, `telephony`, `privileged` (Shizuku user service), `gateway`. Release signing reads a
+git-ignored `signing.properties` (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`) in the
+project root.
+
+## Credits
+
+SimBridge stands on the work of others. Thank you to:
+
+- **[sparkcyf/android-voice-sip-agent](https://github.com/sparkcyf/android-voice-sip-agent)** (sparkcyf,
+  csalinezh and contributors): the cellular ↔ SIP gateway, Shizuku privileged service, call-audio
+  capture/injection, and the pure-Kotlin SIP stack used on both phones.
+- **[yyano/voice-sip-agent-selfhost](https://github.com/yyano/voice-sip-agent-selfhost)** (YANO
+  Yasuhiro, Hndcdr): the "device-in-itself" mode with a built-in SIP registrar, SMS relay, registrar
+  authentication, and the 16 kHz/echo work.
+- **[Shizuku](https://github.com/RikkaApps/Shizuku)** by RikkaApps, and the
+  **[thedjchi fork](https://github.com/thedjchi/Shizuku)** (start on boot, watchdog). They're used
+  through the Apache-2.0 [Shizuku-API](https://github.com/RikkaApps/Shizuku-API).
+- **[baresip](https://github.com/baresip/baresip) / [baresip-studio](https://github.com/juha-h/baresip-studio)**:
+  the softphone used while developing and testing the gateway.
+- Android Jetpack (Compose, Material 3, Material Icons) and Kotlin coroutines.
+
+The full upstream commit history is kept in this repository. Upstream READMEs and docs are in
+[`docs/upstream/`](docs/upstream) and [`docs/`](docs). See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
+for licenses.
+
+## License
+
+**GPL-2.0-or-later** with the upstream Apache-2.0 linking exception, the same as the project it's
+forked from. See [`LICENSE`](LICENSE). The software comes with **no warranty**. Read the
+[disclaimer](DISCLAIMER.md).

@@ -1,5 +1,32 @@
 # Third-party notices
 
+## SimBridge
+
+SimBridge is a fork of **Voice SIP Agent** ([sparkcyf/android-voice-sip-agent](https://github.com/sparkcyf/android-voice-sip-agent))
+via its "selfhost" fork ([yyano/voice-sip-agent-selfhost](https://github.com/yyano/voice-sip-agent-selfhost)), and is
+distributed under the same license: **GPL-2.0-or-later with an Apache-2.0 linking exception**. The upstream git
+history, authorship and copyright notices are preserved in this repository.
+
+SimBridge's own additions: the `phone` module (main-phone app: Telecom calling account, call audio,
+mDNS discovery, Messages-style UI, system SMS copy), the gateway's mDNS advertiser, client-side SIP
+MESSAGE support, contact lookup, status alerts, power-saver profile, the new gateway UI, and
+interface-aware SDP addressing. These are licensed under the same terms.
+
+**SimBridge release APKs do not include the native pjsua2 stack** (the `sip-pjsua2` module is not part of
+the build). Its notices below apply only if you build that module yourself.
+
+SimBridge release APKs include: Kotlin standard library and kotlinx.coroutines (Apache-2.0), AndroidX
+core / activity / Compose UI / Material 3 / Material Icons (Apache-2.0), and the Shizuku API/provider
+libraries (Apache-2.0, gateway only).
+
+**Shizuku itself is not bundled.** Install it separately from
+[RikkaApps/Shizuku](https://github.com/RikkaApps/Shizuku) (Apache-2.0) or
+[thedjchi/Shizuku](https://github.com/thedjchi/Shizuku).
+
+---
+
+## Upstream notices (Voice SIP Agent)
+
 Voice SIP Agent is licensed under the GNU General Public License v2 or later with an Apache-2.0 linking
 exception.
 Release APKs include the following third-party software.

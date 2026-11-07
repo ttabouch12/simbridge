@@ -50,6 +50,10 @@ class SipUserAgent(
 
     private val statusListeners = CopyOnWriteArrayList<EndpointStatusListener>()
     @Volatile private var incomingHandler: IncomingCallHandler? = null
+    /** Server mode: out-of-dialog MESSAGE from the registered phone -> (target number, text). Returns true if accepted. */
+    @Volatile var outgoingMessageHandler: ((String, String) -> Boolean)? = null
+    /** Client mode: out-of-dialog MESSAGE from the server -> (from number, display name, text). Returns true if accepted. */
+    @Volatile var incomingMessageHandler: ((String?, String?, String) -> Boolean)? = null
     @Volatile override var status: EndpointStatus = EndpointStatus(false, "stopped")
         private set
 
@@ -153,11 +157,11 @@ class SipUserAgent(
      * Server mode: deliver an incoming SMS to the registered phone as an out-of-dialog SIP MESSAGE
      * (shown as a chat message in the softphone). Returns false if no phone is currently registered.
      */
-    fun sendMessage(fromNumber: String?, text: String): Boolean {
+    fun sendMessage(fromNumber: String?, text: String, displayName: String? = null): Boolean {
         val peer = peerContactUri ?: return false
         post {
-            val fromUser = fromNumber ?: "sms"
-            val from = NameAddr(fromNumber, "sip:$fromUser@$localDomain").withTag(newTag())
+            val fromUser = (fromNumber ?: "sms").filter { it.isLetterOrDigit() || it == '+' }.ifEmpty { "sms" }
+            val from = NameAddr(displayName ?: fromNumber, "sip:$fromUser@$localDomain").withTag(newTag())
             val to = NameAddr(null, peer)
             val req = newRequest("MESSAGE", peer, from, to, newCallId(), 1)
             req.headers.add("Content-Type", "text/plain;charset=UTF-8")
@@ -315,12 +319,86 @@ class SipUserAgent(
             }
             call != null && (toTag != null || req.method == "INVITE") -> call.onInDialogRequest(req, tx)
             toTag != null -> tx.respond(buildResponse(req, 481))
+            config.serverMode && (req.method == "INVITE" || req.method == "MESSAGE") && !fromRegisteredPhone(from) -> {
+                log.warn("${req.method} from unregistered ${from.address?.hostAddress} rejected")
+                tx.respond(buildResponse(req, 403, toTag = newTag()))
+            }
             req.method == "INVITE" -> onNewInvite(req, tx)
+            req.method == "MESSAGE" && config.serverMode -> onPhoneMessage(req, tx)
+            req.method == "MESSAGE" -> onServerMessage(req, tx)
             req.method == "OPTIONS" -> tx.respond(buildResponse(req, 200, toTag = newTag()).also { addCapabilities(it) })
             req.method == "NOTIFY" -> tx.respond(buildResponse(req, 200, toTag = newTag()))
             req.method == "BYE" || req.method == "INFO" || req.method == "UPDATE" -> tx.respond(buildResponse(req, 481))
             else -> tx.respond(buildResponse(req, 405).also { addCapabilities(it) })
         }
+    }
+
+    /** Server mode: only the currently registered phone (same IP) may place calls or send SMS. */
+    private fun fromRegisteredPhone(from: InetSocketAddress): Boolean {
+        if (peerContactUri == null) return false
+        val reg = serverAddr?.address ?: return false
+        return reg == from.address
+    }
+
+    /** Phone -> cellular SMS: Request-URI user is the destination number, body is the text. */
+    private fun onPhoneMessage(req: SipRequest, tx: ServerTransaction) {
+        val target = SipUri.parse(req.uri)?.user ?: req.to?.sipUri?.user
+        val text = req.bodyText.trim()
+        val ctype = req.headers["Content-Type"]?.lowercase().orEmpty()
+        if (ctype.isNotEmpty() && !ctype.startsWith("text/plain")) {
+            tx.respond(buildResponse(req, 415, toTag = newTag()))
+            return
+        }
+        if (target.isNullOrBlank() || text.isEmpty()) {
+            tx.respond(buildResponse(req, 400, toTag = newTag()))
+            return
+        }
+        val ok = runCatching { outgoingMessageHandler?.invoke(target, text) == true }.getOrDefault(false)
+        tx.respond(buildResponse(req, if (ok) 202 else 480, toTag = newTag()))
+        log.info("SMS from phone to ${redactNumber(target)} ${if (ok) "accepted" else "refused"}")
+    }
+
+    /** Client mode: a text relayed by the gateway (an incoming SMS or a gateway alert). */
+    private fun onServerMessage(req: SipRequest, tx: ServerTransaction) {
+        val from = req.from
+        val text = req.bodyText
+        if (text.isBlank()) { tx.respond(buildResponse(req, 400, toTag = newTag())); return }
+        val ok = runCatching { incomingMessageHandler?.invoke(from?.sipUri?.user, from?.displayName, text) == true }
+            .getOrDefault(false)
+        tx.respond(buildResponse(req, if (ok) 200 else 480, toTag = newTag()))
+    }
+
+    /**
+     * Client mode: send a text to [target] through the server (the gateway turns it into an SMS).
+     * [onResult] gets the final SIP code, or null on timeout; called on the UA thread.
+     */
+    fun sendMessageTo(target: String, text: String, onResult: (Int?) -> Unit) = post {
+        if (!started || !::serverAddr.isInitialized) { onResult(null); return@post }
+        val user = target.filter { it.isLetterOrDigit() || it == '+' || it == '*' || it == '#' }
+        val uri = "sip:$user@${account.domain}"
+        val req = newRequest("MESSAGE", uri, NameAddr(account.displayName, aor).withTag(newTag()),
+            NameAddr(null, uri), newCallId(), 1)
+        req.headers.add("Content-Type", "text/plain;charset=UTF-8")
+        req.body = text.toByteArray(Charsets.UTF_8)
+        var authTried = false
+        fun handle(r: SipResponse?) {
+            when {
+                r == null -> onResult(null)
+                r.isProvisional -> Unit
+                (r.code == 401 || r.code == 407) && !authTried -> {
+                    authTried = true
+                    val auth = authorizationFor(r, "MESSAGE", uri)
+                    if (auth == null) { onResult(r.code); return }
+                    val again = newRequest("MESSAGE", uri, req.from!!, NameAddr(null, uri), req.callId!!, 2)
+                    again.headers.add("Content-Type", "text/plain;charset=UTF-8")
+                    again.headers.add(auth.first, auth.second)
+                    again.body = req.body
+                    sendClient(again) { handle(it) }
+                }
+                else -> onResult(r.code)
+            }
+        }
+        sendClient(req) { handle(it) }
     }
 
     private fun onNewInvite(req: SipRequest, tx: ServerTransaction) {
@@ -437,6 +515,9 @@ class SipUserAgent(
             peerAor = aorUser
             peerContactUri = "sip:$cUser@${from.address.hostAddress}:${from.port}"
             serverAddr = from
+            // Use the local address on the phone's network (home Wi-Fi vs. our own hotspot), so
+            // SDP and Contact point somewhere the phone can actually reach.
+            routeTo(from.address)?.hostAddress?.let { if (it != localIp) { log.info("local address now $it"); localIp = it } }
             peerExpiry?.cancel(false)
             val holdMs = granted.toLong() * 2 * 1000 + 30_000
             peerExpiry = schedule(holdMs) {
@@ -582,6 +663,6 @@ class SipUserAgent(
     }
 
     companion object {
-        const val ALLOW = "INVITE, ACK, CANCEL, BYE, OPTIONS, INFO, NOTIFY, UPDATE"
+        const val ALLOW = "INVITE, ACK, CANCEL, BYE, OPTIONS, INFO, NOTIFY, UPDATE, MESSAGE"
     }
 }

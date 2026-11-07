@@ -54,4 +54,11 @@ interface IPrivilegedService {
 
     /** Explicit restoration; only changes the role while this app still holds it. */
     Bundle restoreDefaultDialer(String previousHolder) = 11;
+
+    /**
+     * Companion power profile (fixed command set, never arbitrary shell). on=true records the
+     * current values and applies the saver profile, returning the recorded state as JSON;
+     * on=false restores from [savedState] and returns "". Extra lines go to the log.
+     */
+    String setCompanionPowerMode(boolean on, String packageName, String savedState) = 12;
 }

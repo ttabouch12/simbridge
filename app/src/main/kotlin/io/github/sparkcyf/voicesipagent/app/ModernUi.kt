@@ -1,0 +1,364 @@
+package io.github.sparkcyf.voicesipagent.app
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Build
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.PhoneForwarded
+import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
+import androidx.compose.material.icons.rounded.BatteryAlert
+import androidx.compose.material.icons.rounded.BatteryChargingFull
+import androidx.compose.material.icons.rounded.BatteryFull
+import androidx.compose.material.icons.rounded.BatterySaver
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.Smartphone
+import androidx.compose.material.icons.rounded.Sms
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.VolumeOff
+import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material.icons.rounded.WifiTethering
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.rememberTopAppBarState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import io.github.sparkcyf.voicesipagent.privileged.ShizukuConnector
+import kotlinx.coroutines.delay
+import java.net.Inet4Address
+import java.net.NetworkInterface
+
+private val Good = Color(0xFF1E8E3E)
+private val Bad = Color(0xFFD93025)
+private val Warn = Color(0xFFF29900)
+
+@Composable
+fun GatewayTheme(content: @Composable () -> Unit) {
+    val dark = isSystemInDarkTheme()
+    val ctx = LocalContext.current
+    val scheme: ColorScheme = when {
+        Build.VERSION.SDK_INT >= 31 && dark -> dynamicDarkColorScheme(ctx)
+        Build.VERSION.SDK_INT >= 31 -> dynamicLightColorScheme(ctx)
+        dark -> darkColorScheme()
+        else -> lightColorScheme()
+    }
+    MaterialTheme(colorScheme = scheme, content = content)
+}
+
+/** IPv4 addresses the main phone can register to, labelled by interface type. */
+private fun localAddresses(): List<Pair<String, String>> = runCatching {
+    NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }.flatMap { nif ->
+        nif.inetAddresses.toList().filterIsInstance<Inet4Address>().map { addr ->
+            val n = nif.name
+            val label = when {
+                n.startsWith("wlan") -> "Home Wi-Fi"
+                n.startsWith("swlan") || n.startsWith("ap") || n.startsWith("wigig") -> "This phone's hotspot"
+                n.startsWith("rndis") || n.startsWith("usb") -> "USB tether"
+                else -> null
+            }
+            label?.let { it to addr.hostAddress.orEmpty() }
+        }.filterNotNull()
+    }
+}.getOrDefault(emptyList())
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ModernScreen(rt: GatewayRuntime, setTakeover: (Boolean) -> Unit, openAdvanced: () -> Unit) {
+    currentUiLang = UiLang.EN
+    val h by rt.health.collectAsState()
+    val cur by rt.settingsFlow.collectAsState()
+    val power by rt.companionPower.collectAsState()
+    val battery by rt.battery.collectAsState()
+    val log by AppLog.tail.collectAsState()
+    var addresses by remember { mutableStateOf(localAddresses()) }
+    LaunchedEffect(Unit) { while (true) { addresses = localAddresses(); delay(5000) } }
+    val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
+
+    Scaffold(
+        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
+        topBar = {
+            LargeTopAppBar(
+                title = { Text("SimBridge Gateway") },
+                actions = {
+                    IconButton(onClick = { rt.runSetup(); rt.restartSip() }) { Icon(Icons.Rounded.Refresh, "Refresh") }
+                    IconButton(onClick = openAdvanced) { Icon(Icons.Rounded.Tune, "Advanced") }
+                },
+                scrollBehavior = scroll,
+            )
+        },
+    ) { pad ->
+        LazyColumn(
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = pad.calculateTopPadding() + 4.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            item { HeroCard(h, cur.takeover) }
+            item {
+                GroupCard("Status") {
+                    val shz = h.shizuku == ShizukuConnector.State.CONNECTED
+                    StatusRow(Icons.Rounded.Shield, "Shizuku helper",
+                        if (shz) "Running" else "Not running — ${h.shizukuDetail.ifBlank { h.shizuku.name }}", shz)
+                    if (h.shizuku == ShizukuConnector.State.PERMISSION_REQUIRED || h.shizuku == ShizukuConnector.State.PERMISSION_DENIED) {
+                        FilledTonalButton(onClick = { rt.shizuku.requestPermission() }, modifier = Modifier.padding(start = 56.dp, bottom = 8.dp)) {
+                            Text("Allow Shizuku access")
+                        }
+                    }
+                    StatusRow(Icons.Rounded.Smartphone, "Main phone",
+                        if (h.sip.ready) "Connected" else h.sip.detail.replaceFirstChar { it.uppercase() }, h.sip.ready)
+                    StatusRow(Icons.Rounded.GraphicEq, "Call audio access",
+                        if (h.audioReady) "Ready" else "Not available yet", h.audioReady)
+                    val b = battery
+                    StatusRow(
+                        when { b == null -> Icons.Rounded.BatteryFull; b.charging -> Icons.Rounded.BatteryChargingFull; b.percent <= 20 -> Icons.Rounded.BatteryAlert; else -> Icons.Rounded.BatteryFull },
+                        "Battery", b?.let { "${it.percent}%" + if (it.charging) " · charging" else " · on battery" } ?: "Unknown",
+                        b == null || b.charging || b.percent > 20, neutralWhenOk = true,
+                    )
+                }
+            }
+            item {
+                GroupCard("Controls") {
+                    SwitchRow(Icons.AutoMirrored.Rounded.PhoneForwarded, "Forward calls & texts",
+                        when { h.takeoverOffPending -> "Turning off after this call"; h.takeoverOnPending -> "Turning on after this call"
+                            cur.takeover -> "Calls and SMS go to your main phone"; else -> "Off — this phone rings normally" },
+                        cur.takeover, setTakeover)
+                    SwitchRow(Icons.Rounded.BatterySaver, "Companion power saver",
+                        if (power) "On — only calls, SMS and hotspot stay active" else "Restrict other apps, location, Bluetooth and scanning",
+                        power, { rt.setCompanionPower(it) }, enabled = h.shizuku == ShizukuConnector.State.CONNECTED)
+                    SwitchRow(Icons.Rounded.VolumeOff, "Keep this phone silent during calls",
+                        "The call is heard only on the main phone", cur.muteEarpiece, { rt.setMuteEarpiece(it) })
+                }
+            }
+            item { NetworkCard(addresses, cur.localSipPort) }
+            item { SecurityCard(rt, cur.registrarPassword) }
+            item { ActivityCard(log) }
+            item {
+                TextButton(onClick = openAdvanced, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.Tune, null); Spacer(Modifier.width(8.dp)); Text("Advanced settings & diagnostics")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeroCard(h: HealthState, takeover: Boolean) {
+    val ok = takeover && h.cellularReady && h.sip.ready
+    val (title, sub) = when {
+        !takeover -> "Forwarding is off" to "Calls and texts stay on this phone"
+        ok -> "Forwarding to your main phone" to "Calls, SMS and keypad tones are bridged"
+        !h.sip.ready -> "Main phone not connected" to "Open SimBridge on the main phone and check Wi-Fi"
+        h.shizuku != ShizukuConnector.State.CONNECTED -> "Shizuku isn't running" to "Calls can't be bridged until it starts"
+        else -> "Setting up" to h.readinessDetail
+    }
+    val tint = if (ok) Good else if (!takeover) MaterialTheme.colorScheme.outline else Bad
+    ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(56.dp).clip(CircleShape).background(tint.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
+                Icon(if (ok) Icons.Rounded.CheckCircle else Icons.Rounded.ErrorOutline, null, tint = tint, modifier = Modifier.size(34.dp))
+            }
+            Spacer(Modifier.width(16.dp))
+            Column {
+                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(sub, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f))
+                if (h.session != null) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("● Call in progress", color = Good, style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupCard(title: String, content: @Composable () -> Unit) {
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Column(Modifier.padding(vertical = 8.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 4.dp))
+            content()
+        }
+    }
+}
+
+@Composable
+private fun StatusRow(icon: ImageVector, title: String, detail: String, ok: Boolean, neutralWhenOk: Boolean = false) {
+    ListItem(
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        leadingContent = { Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+        headlineContent = { Text(title) },
+        supportingContent = { Text(detail) },
+        trailingContent = {
+            if (!(ok && neutralWhenOk)) Box(Modifier.size(10.dp).clip(CircleShape).background(if (ok) Good else Bad))
+        },
+    )
+}
+
+@Composable
+private fun SwitchRow(icon: ImageVector, title: String, detail: String, checked: Boolean, onChange: (Boolean) -> Unit, enabled: Boolean = true) {
+    ListItem(
+        modifier = Modifier.clickable(enabled = enabled) { onChange(!checked) },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        leadingContent = { Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+        headlineContent = { Text(title) },
+        supportingContent = { Text(detail) },
+        trailingContent = { Switch(checked = checked, onCheckedChange = onChange, enabled = enabled) },
+    )
+}
+
+@Composable
+private fun NetworkCard(addresses: List<Pair<String, String>>, port: Int) {
+    val ctx = LocalContext.current
+    GroupCard("Main phone connects to") {
+        if (addresses.isEmpty()) {
+            StatusRow(Icons.Rounded.Wifi, "No network", "Connect this phone to Wi-Fi or turn on its hotspot", false)
+        }
+        addresses.forEach { (label, ip) ->
+            ListItem(
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                leadingContent = { Icon(if (label.contains("hotspot")) Icons.Rounded.WifiTethering else Icons.Rounded.Wifi, null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                headlineContent = { Text(label) },
+                supportingContent = { Text("$ip:$port", fontFamily = FontFamily.Monospace) },
+                trailingContent = {
+                    IconButton(onClick = {
+                        ctx.getSystemService(ClipboardManager::class.java)
+                            ?.setPrimaryClip(ClipData.newPlainText("gateway", "sip:$ip:$port;transport=udp"))
+                    }) { Icon(Icons.Rounded.ContentCopy, "Copy") }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SecurityCard(rt: GatewayRuntime, current: String) {
+    var editing by remember { mutableStateOf(false) }
+    var pw by remember(current) { mutableStateOf(current) }
+    GroupCard("Security") {
+        val protected = current.isNotEmpty()
+        ListItem(
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            leadingContent = { Icon(if (protected) Icons.Rounded.Lock else Icons.Rounded.LockOpen, null,
+                tint = if (protected) Good else Warn) },
+            headlineContent = { Text(if (protected) "Password protected" else "No password") },
+            supportingContent = { Text(if (protected) "Only your main phone (with the password) can use this SIM"
+                else "Any device on the same Wi-Fi could connect") },
+            trailingContent = { TextButton(onClick = { editing = !editing }) { Text(if (editing) "Close" else "Change") } },
+        )
+        AnimatedVisibility(editing) {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(pw, { pw = it }, label = { Text("Gateway password") }, singleLine = true,
+                    leadingIcon = { Icon(Icons.Rounded.Key, null) },
+                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                Text("Enter the same password in SimBridge on the main phone (Settings → Gateway password).",
+                    style = MaterialTheme.typography.bodySmall)
+                Button(onClick = { rt.setRegistrarPassword(pw); editing = false }) { Text("Save") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityCard(log: List<String>) {
+    var open by remember { mutableStateOf(false) }
+    GroupCard("Recent activity") {
+        ListItem(
+            modifier = Modifier.clickable { open = !open },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            leadingContent = { Icon(Icons.AutoMirrored.Rounded.ReceiptLong, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+            headlineContent = { Text(log.lastOrNull()?.substringAfter(' ')?.take(60) ?: "Nothing yet") },
+            supportingContent = { Text(if (open) "Tap to hide" else "Tap to show the log") },
+            trailingContent = { Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null) },
+        )
+        AnimatedVisibility(open) {
+            Text(log.takeLast(40).reversed().joinToString("\n"), fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                lineHeight = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AdvancedScaffold(onBack: () -> Unit, content: @Composable (Modifier) -> Unit) {
+    Scaffold(topBar = {
+        TopAppBar(title = { Text("Advanced") },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") } })
+    }) { pad -> content(Modifier.padding(pad)) }
+}
+
+@Suppress("unused")
+private fun copy(ctx: Context, text: String) =
+    ctx.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("gateway", text))

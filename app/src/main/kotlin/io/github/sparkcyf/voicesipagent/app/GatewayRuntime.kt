@@ -6,6 +6,7 @@ import android.net.LinkProperties
 import android.net.Network
 import android.os.Bundle
 import android.os.Build
+import android.os.SystemClock
 import android.telecom.TelecomManager
 import android.content.ComponentName
 import android.content.pm.PackageManager
@@ -101,6 +102,7 @@ class GatewayRuntime private constructor(context: Context) {
             effectiveCallAccess = CallAccess.effective(settings.callAccess, Build.VERSION.SDK_INT, holds))
     })
     val health: StateFlow<HealthState> = _health
+    private val advertiser by lazy { GatewayAdvertiser(app) }
     private val _dialerMessage = MutableStateFlow("")
     val dialerMessage: StateFlow<String> = _dialerMessage
 
@@ -114,6 +116,14 @@ class GatewayRuntime private constructor(context: Context) {
     )
     /** Built-in SIP user agent. */
     private var sip: CallEndpoint? = null
+
+    // ---- companion features: status alerts, power profile, battery
+    val alerts = GatewayAlerts { text -> (sip as? SipUserAgent)?.sendMessage("gateway", text, "SimBridge Gateway") == true }
+    private val powerPrefs = app.getSharedPreferences("companion_power", Context.MODE_PRIVATE)
+    private val _companionPower = MutableStateFlow(powerPrefs.getBoolean("on", false))
+    val companionPower: StateFlow<Boolean> = _companionPower
+    private val _battery = MutableStateFlow(BatteryInfo.read(app))
+    val battery: StateFlow<BatteryInfo.State?> = _battery
     private var bridge: CallBridge? = null
     private var echo: EchoEndpoint? = null
     private var started = false
@@ -172,11 +182,16 @@ class GatewayRuntime private constructor(context: Context) {
             }
         }
         AppLog.i("runtime starting ($settings)")
+        cellular.contactResolver = { n -> ContactNames.lookup(app, n) }
+        if (SystemClock.elapsedRealtime() < 15 * 60_000L) {
+            alerts.post("🔄 The SIM phone restarted and SimBridge Gateway is running again.")
+        }
         shizuku.addListener { state, svc ->
             val detail = shizuku.detail
             worker.execute {
                 if (shizuku.state != state || shizuku.service !== svc) return@execute
                 _health.update { it.copy(shizuku = state, shizukuDetail = detail) }
+                alerts.shizuku(state == ShizukuConnector.State.CONNECTED, SystemClock.elapsedRealtime())
                 if (state == ShizukuConnector.State.CONNECTED && svc != null) {
                     if (pendingDialerChange?.acquire == true) attemptDialerChange()
                     runSetup()
@@ -290,6 +305,9 @@ class GatewayRuntime private constructor(context: Context) {
 
     private fun periodicCheck() {
         if (healthCheck == null) return
+        _battery.value = BatteryInfo.read(app)
+        alerts.battery(_battery.value)
+        alerts.shizuku(shizuku.state == ShizukuConnector.State.CONNECTED, SystemClock.elapsedRealtime())
         refreshRoleState()
         val svc = shizuku.service ?: return updateReadiness()
         try {
@@ -504,6 +522,7 @@ class GatewayRuntime private constructor(context: Context) {
     private fun sipStatus(endpoint: CallEndpoint, status: EndpointStatus) = worker.execute {
         if (sip !== endpoint) return@execute
         _health.update { it.copy(sip = status) }
+        if (status.ready) alerts.flush()
         updateReadiness()
     }
 
@@ -552,8 +571,10 @@ class GatewayRuntime private constructor(context: Context) {
                 sipLog,
             ).also { ua ->
                 ua.addStatusListener { ep, st -> sipStatus(ep, st) }
+                ua.outgoingMessageHandler = { to, text -> sendSmsFromPhone(to, text) }
                 ua.start()
             }
+            if (s.serverMode) advertiser.start(s.localSipPort)
             sip = ep
             _health.update { it.copy(sip = ep.status) }
             AppLog.i("SIP stack: built-in${if (s.serverMode) " (server mode)" else ""}")
@@ -564,6 +585,7 @@ class GatewayRuntime private constructor(context: Context) {
     }
 
     private fun stopSip(releaseLibrary: Boolean = false) {
+        advertiser.stop()
         val previous = sip
         sip = null
         (previous as? SipUserAgent)?.stop()
@@ -784,12 +806,35 @@ class GatewayRuntime private constructor(context: Context) {
     /** Forward an incoming cellular SMS to the registered phone (server mode) as a SIP MESSAGE. */
     fun forwardSms(from: String?, text: String) = worker.execute {
         val s = sip
-        if (s is SipUserAgent && s.sendMessage(from, text)) {
+        if (s is SipUserAgent && s.sendMessage(from, text, ContactNames.lookup(app, from))) {
             AppLog.i("SMS forwarded to the registered phone")
         } else {
             AppLog.w("SMS not forwarded: no phone registered")
         }
     }
+
+    /** Main phone -> cellular SMS through this phone's SIM. Failures come back to the main phone as an alert. */
+    private fun sendSmsFromPhone(to: String, text: String): Boolean {
+        if (!_health.value.takeover) return false
+        return SmsSender.send(app, to, text) { ok, detail ->
+            AppLog.i("SMS to ${io.github.sparkcyf.voicesipagent.voice.redactNumber(to)}: $detail")
+            if (!ok) alerts.post("❌ Your SMS to $to was not sent ($detail).")
+        }
+    }
+
+    /** Companion power profile: reversible battery saver for a phone that only relays. */
+    fun setCompanionPower(on: Boolean) = worker.execute {
+        val svc = shizuku.service ?: run { AppLog.w("power mode needs Shizuku"); return@execute }
+        if (on == _companionPower.value) return@execute
+        val saved = powerPrefs.getString("state", "").orEmpty()
+        val r = runCatching { svc.setCompanionPowerMode(on, app.packageName, saved) }
+            .onFailure { AppLog.w("power mode failed", it) }.getOrNull() ?: return@execute
+        powerPrefs.edit().putBoolean("on", on).putString("state", if (on) r else "").apply()
+        _companionPower.value = on
+        AppLog.i("companion power mode ${if (on) "ON" else "OFF"}")
+    }
+
+    fun setRegistrarPassword(pw: String) = applySettings(settings.copy(registrarPassword = pw))
 
     companion object {
         @Volatile private var instance: GatewayRuntime? = null

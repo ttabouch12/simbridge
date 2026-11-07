@@ -257,11 +257,20 @@ class PrivilegedService(context: Context) : IPrivilegedService.Stub() {
     private fun dozeAllowlisted(pkg: String) =
         ShellEnv.run("cmd", "deviceidle", "whitelist").out.lineSequence().any { it.trim().endsWith(",$pkg") || it.contains(",$pkg,") }
 
+    override fun setCompanionPowerMode(on: Boolean, packageName: String, savedState: String): String {
+        enforceCaller(packageName)
+        return PowerProfile.apply(on, packageName, savedState)
+    }
+
     companion object {
         private const val TAG = "VsaPrivileged"
         private val PHONE_RUNTIME_PERMISSIONS = listOf(
             "android.permission.CALL_PHONE",
             "android.permission.READ_PHONE_STATE",
+            "android.permission.SEND_SMS",
+            "android.permission.RECEIVE_SMS",
+            "android.permission.READ_CONTACTS",
+            "android.permission.READ_PHONE_NUMBERS",
         )
     }
 }

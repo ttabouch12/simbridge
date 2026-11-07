@@ -63,10 +63,18 @@ class MainActivity : DialerRoleActivity() {
         val runtime = GatewayRuntime.get(this)
         GatewayService.start(this)
         setContent {
-            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+            GatewayTheme {
                 val message by roleMessage.collectAsState()
-                Scaffold { pad -> Screen(runtime, Modifier.padding(pad), ::requestDialer, ::switchDialer,
-                    ::chooseDialerInSettings, ::cancelDialerChange, ::setTakeoverFromUi, message) }
+                var advanced by remember { mutableStateOf(false) }
+                androidx.activity.compose.BackHandler(enabled = advanced) { advanced = false }
+                if (advanced) {
+                    AdvancedScaffold(onBack = { advanced = false }) { m ->
+                        Screen(runtime, m, ::requestDialer, ::switchDialer,
+                            ::chooseDialerInSettings, ::cancelDialerChange, ::setTakeoverFromUi, message)
+                    }
+                } else {
+                    ModernScreen(runtime, ::setTakeoverFromUi) { advanced = true }
+                }
             }
         }
     }
@@ -78,7 +86,7 @@ private fun Screen(rt: GatewayRuntime, modifier: Modifier, requestDialer: () -> 
     val h by rt.health.collectAsState()
     val log by AppLog.tail.collectAsState()
     val cur by rt.settingsFlow.collectAsState()
-    currentUiLang = UiLang.of(cur.uiLanguage)
+    currentUiLang = UiLang.EN
     Column(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),

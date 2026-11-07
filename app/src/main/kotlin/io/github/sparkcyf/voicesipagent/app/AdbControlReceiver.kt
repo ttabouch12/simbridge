@@ -53,6 +53,9 @@ class AdbControlReceiver : BroadcastReceiver() {
                     ),
                 )
             }
+            "power" -> rt.setCompanionPower(intent.getBooleanExtra("on", true))
+            "reg-password" -> rt.setRegistrarPassword(intent.getStringExtra("password") ?: "")
+            "alert-test" -> rt.alerts.post(intent.getStringExtra("text") ?: "Test alert from SimBridge Gateway")
             else -> AppLog.w("adb control: unknown op '$op'")
         }
     }

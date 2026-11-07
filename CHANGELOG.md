@@ -1,46 +1,26 @@
-# Изменения форка (selfhost)
+# Changelog
 
-Записи — только про наши изменения поверх
-[sparkcyf/android-voice-sip-agent](https://github.com/sparkcyf/android-voice-sip-agent).
-Полная история — в `git log`.
+## SimBridge 1.0.0
 
-## 0.2.0-selfhost4 — 22.10.2026 (versionCode 103)
-- **Фикс глубокого сна (Doze).** Служба-шлюз держит partial wakelock (`voicesipagent:gateway`),
-  пока включён takeover — CPU не засыпает вместе с телефоном, и поток SIP-сокета продолжает
-  отвечать на REGISTER. Без этого на агрессивных прошивках (ZTE/Nubia, Xiaomi, Transsion) телефон
-  уходил в Doze, пакеты REGISTER копились непрочитанными в приёмной очереди сокета, и регистрация
-  софтфона молча отваливалась до следующего пробуждения. Белый список Doze не помогал: он снимает
-  сетевые/алармовые лимиты, но не держит CPU.
-- Проверено на Nubia NX769J: wakelock держится (`dumpsys power`), Doze включён, шлюз жив; до фикса
-  в Doze приёмная очередь `:5062` набирала ~230 КБ непрочитанных REGISTER.
+First release of SimBridge, based on voice-sip-agent-selfhost (see [`docs/upstream/CHANGELOG.selfhost.md`](docs/upstream/CHANGELOG.selfhost.md)
+for earlier history).
 
-## selfhost — текущее
+### New: SimBridge app for the main phone (`phone` module)
+- Calls ring in the **system Phone app** through a Telecom calling account (incoming and outgoing,
+  call history, contact names, keypad DTMF, mute/speaker/Bluetooth).
+- **Messages-style texting**: conversations, contact photos, bubbles, notifications with Reply and
+  Mark as read, send status with retry, new chat from contacts.
+- Optional copy of relayed texts into the **system SMS database**, so they show in Google Messages or
+  the default SMS app (needs one `adb shell appops set io.github.simbridge WRITE_SMS allow`).
+- **Automatic discovery** of the gateway over mDNS (`_simbridge._udp`), with a fallback to the
+  hotspot's gateway address and the last address that worked. Reconnects after network changes.
 
-- **Настраиваемая аренда регистрации** (`registrarLeaseSec`, по умолчанию 600 с) вместо жёстких
-  120 с. Регистратор удерживает последний контакт ~2×аренды, поэтому короткие «засыпания»
-  софтфона в фоне (Doze) не роняют регистрацию и не пропускают входящий.
-- **Русский/английский интерфейс** с ⓘ-пояснениями у каждого пункта и разделом FAQ (`Ui.kt`).
-
-## selfhost — базовое (режим «устройство в себе»)
-
-- **Встроенный SIP-регистратор:** приложение само принимает REGISTER на `:5062`, внешний PBX не
-  нужен (включён по умолчанию). Входящий GSM-вызов и SMS маршрутизируются на зарегистрированный
-  софтфон.
-- **Пересылка входящих SMS** в SIP (`MESSAGE`).
-- **Сборка без нативного pjsip** — чисто-Kotlin SIP-стек (UDP + G.711). В дефолтной сборке нет
-  статически слинкованных pjsip/OpenSSL/libopus (это влияет и на лицензии сторонних библиотек —
-  см. README → «Лицензия и благодарности»).
-
----
-
-### Проверено (Nubia NX769J, Android 16)
-
-Входящий звонок с двусторонним звуком (метод «Direct telephony»), входящая SMS, встроенный
-регистратор, самовосстановление за ≤2 мин.
-
-### Известные TODO
-
-- Исходящие звонки/SMS с дальнего телефона через SIM шлюза.
-- Автозапуск Shizuku после ребута без root (см. `docs/shizuku-reboot.md`).
-- Интернет-часть (белый IP/VPN) — проверить вживую.
-- SIP-аутентификация регистратора (безопасность открытого `5062`).
+### Gateway (SIM phone)
+- Advertises itself over mDNS. No IP addresses needed.
+- **Fixed silent calls over the SIM phone's hotspot**: SDP/Contact now use the local address on the
+  main phone's network instead of the default route's.
+- SIP `MESSAGE` relay of texts from the main phone, with contact names on incoming texts and calls.
+- Status alerts as texts: reboot, Shizuku down/back, battery low, unplugged.
+- No call screen and no full-screen wake-ups while the main phone is connected (as default phone app).
+- Companion power-saver profile, new Material 3 interface, registrar password editor.
+- New app ID `io.github.simbridge.gateway`, so it installs alongside upstream builds.

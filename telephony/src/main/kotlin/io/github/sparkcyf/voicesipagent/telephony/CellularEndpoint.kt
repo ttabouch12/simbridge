@@ -171,6 +171,9 @@ class CellularEndpoint(
 
     // ------------------------------------------------------------ InCallService callbacks (main thread)
 
+    /** Optional number -> contact name lookup (set by the app; needs READ_CONTACTS). */
+    @Volatile var contactResolver: ((String) -> String?)? = null
+
     internal fun onCallAdded(source: GatewayInCallService, call: Call) {
         if (source !== service || closed) return
         if (observed.containsKey(call)) return
@@ -204,7 +207,9 @@ class CellularEndpoint(
                     reconcileCalls(); reportCalls()
                     return
                 }
-                val leg = CellularLeg("c${ids.getAndIncrement()}", LegDirection.INBOUND, Party(number.ifEmpty { null }, details.callerDisplayName), null, this, main)
+                val shownName = details.callerDisplayName?.takeIf { it.isNotBlank() }
+                    ?: number.takeIf { it.isNotEmpty() }?.let { n -> runCatching { contactResolver?.invoke(n) }.getOrNull() }
+                val leg = CellularLeg("c${ids.getAndIncrement()}", LegDirection.INBOUND, Party(number.ifEmpty { null }, shownName), null, this, main)
                 legs[call] = leg
                 leg.bind(call)
                 log("incoming cellular call ${redactNumber(number)} -> gateway (leg ${leg.id})")

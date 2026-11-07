@@ -1,17 +1,17 @@
 # voice-sip-agent-selfhost - телефон-шлюз «устройство в себе», без root (Android 13+)
 
-> 🇬🇧 **[English version →](README.md)** · 🇷🇺 Русская версия (этот файл).
-> Оригинальный README проекта - [`README.upstream.md`](README.upstream.md).
+> 🇬🇧 **[English version →](README.selfhost.md)** · 🇷🇺 Русская версия (этот файл).
+> Оригинальный README проекта - [`README.upstream.md`](README.voice-sip-agent.md).
 
-> 👉 **Новичку - начни отсюда:** [`docs/КАК-НАСТРОИТЬ.md`](docs/КАК-НАСТРОИТЬ.md) - пошаговая
+> 👉 **Новичку - начни отсюда:** [`docs/КАК-НАСТРОИТЬ.md`](../КАК-НАСТРОИТЬ.md) - пошаговая
 > инструкция «с нуля» простым языком (поставь то, включи это, проброс портов).
 
 ## Карта документации
 
-- **Пользователю:** [`docs/КАК-НАСТРОИТЬ.md`](docs/КАК-НАСТРОИТЬ.md) - единственная страница,
+- **Пользователю:** [`docs/КАК-НАСТРОИТЬ.md`](../КАК-НАСТРОИТЬ.md) - единственная страница,
   которой хватит, чтобы настроить всё с нуля.
-- **Справка:** [настройки приложения](docs/settings-ru.md) · [клиент baresip](docs/client-baresip.md) ·
-  [Shizuku после перезагрузки](docs/shizuku-reboot.md) · [интернет и безопасность](docs/internet-security.md).
+- **Справка:** [настройки приложения](../settings-ru.md) · [клиент baresip](../client-baresip.md) ·
+  [Shizuku после перезагрузки](../shizuku-reboot.md) · [интернет и безопасность](../internet-security.md).
 - **Разработчику:** [сборка APK](#сборка-apk).
 
 Старый (но относительно свежий) Android-телефон с SIM лежит дома на зарядке и Wi-Fi. Входящие
@@ -44,10 +44,10 @@
 - [Требования к телефону-шлюзу](#требования-к-телефону-шлюзу)
 - [Какой телефон выбрать](#какой-телефон-выбрать)
 - [Установка на телефон-шлюз](#установка-на-телефон-шлюз)
-- [Настройки приложения](#настройки-приложения) → полный справочник в [`docs/settings-ru.md`](docs/settings-ru.md)
-- [Рекомендуемый клиент - baresip](#рекомендуемый-клиент--baresip) → подробно в [`docs/client-baresip.md`](docs/client-baresip.md)
-- [Shizuku после перезагрузки](#shizuku-после-перезагрузки) → подробно в [`docs/shizuku-reboot.md`](docs/shizuku-reboot.md)
-- [Вывод в интернет и безопасность](#вывод-в-интернет-и-безопасность) → подробно в [`docs/internet-security.md`](docs/internet-security.md)
+- [Настройки приложения](#настройки-приложения) → полный справочник в [`docs/settings-ru.md`](../settings-ru.md)
+- [Рекомендуемый клиент - baresip](#рекомендуемый-клиент--baresip) → подробно в [`docs/client-baresip.md`](../client-baresip.md)
+- [Shizuku после перезагрузки](#shizuku-после-перезагрузки) → подробно в [`docs/shizuku-reboot.md`](../shizuku-reboot.md)
+- [Вывод в интернет и безопасность](#вывод-в-интернет-и-безопасность) → подробно в [`docs/internet-security.md`](../internet-security.md)
 - [Диагностика (adb)](#диагностика-adb)
 - [Сборка APK](#сборка-apk)
 - [Честный статус и риски](#честный-статус-и-риски)
@@ -86,7 +86,7 @@
 Проверено на **Nubia NX769J (Android 16)** и в связке с клиентом baresip:
 
 - ✅ Входящий GSM-вызов на SIM шлюза → звонит софтфон на другом телефоне, **звук в обе стороны**
-  (нужен метод захвата **«Direct telephony»** - см. [настройки](docs/settings-ru.md), раздел 4.4).
+  (нужен метод захвата **«Direct telephony»** - см. [настройки](../settings-ru.md), раздел 4.4).
 - ✅ Встроенный SIP-регистратор: софтфон регистрируется прямо на телефон-шлюз.
 - ✅ Входящая **SMS** → приходит в чат софтфона.
 - ✅ Самовосстановление: после перезапуска приложения связь поднимается за ≤2 минуты.
@@ -99,7 +99,7 @@
 
 > ⚠ **Способ захвата звука зависит от модели.** На Nubia рабочий - «Direct telephony»;
 > автоматический режим выбирал неправильно (звук не шёл). На другом телефоне может понадобиться
-> «Call redirection». Как определить - [`docs/settings-ru.md`](docs/settings-ru.md), раздел 4.4.
+> «Call redirection». Как определить - [`docs/settings-ru.md`](../settings-ru.md), раздел 4.4.
 >
 > ⚠ **Посторонний VPN на телефоне-шлюзе ломает регистрацию** - заворачивает SIP в туннель, и
 > софтфон виснет на подключении. Отключи любой VPN на телефоне-шлюзе.
@@ -209,9 +209,9 @@ adb shell "dumpsys media.audio_policy | grep -E 'TELEPHONY_TX|TELEPHONY_RX'"
 («Cellular audio»)**: если звонок соединяется, но люди не слышат друг друга - переключай именно
 его.
 
-![Главный экран](docs/images/ru-01b-registered.png)
+![Главный экран](../images/ru-01b-registered.png)
 
-**Полный справочник всех настроек со скриншотами** - [`docs/settings-ru.md`](docs/settings-ru.md).
+**Полный справочник всех настроек со скриншотами** - [`docs/settings-ru.md`](../settings-ru.md).
 
 Кратко для режима «устройство в себе»:
 
@@ -234,7 +234,7 @@ adb shell "dumpsys media.audio_policy | grep -E 'TELEPHONY_TX|TELEPHONY_RX'"
 Пароль/прокси не нужны. **Порт `:5062` обязателен прямо в AoR** - иначе всё уйдёт на `:5060`.
 
 Полная инструкция (две SIM - один софтфон, ответы на SMS, альтернативы) -
-[`docs/client-baresip.md`](docs/client-baresip.md).
+[`docs/client-baresip.md`](../client-baresip.md).
 
 ---
 
@@ -250,7 +250,7 @@ adb shell "dumpsys media.audio_policy | grep -E 'TELEPHONY_TX|TELEPHONY_RX'"
 - **Без рута:** либо не перезагружать телефон, либо держать рядом маленький постоянный ПК/SBC,
   который по USB/Wi-Fi-adb выполняет команду запуска при загрузке.
 
-Команды, пути и диагностика - [`docs/shizuku-reboot.md`](docs/shizuku-reboot.md).
+Команды, пути и диагностика - [`docs/shizuku-reboot.md`](../shizuku-reboot.md).
 
 ---
 
@@ -268,7 +268,7 @@ SIP-порта и RTP (**1:1, те же номера портов**), а сам 
 > Нестандартный порт - маскировка, не защита; **VPN не нужен.**
 
 Полностью, по шагам (прямой доступ, пароль регистратора, безопасность) -
-[`docs/internet-security.md`](docs/internet-security.md).
+[`docs/internet-security.md`](../internet-security.md).
 
 ---
 
@@ -283,7 +283,7 @@ adb logcat -s VoiceSipAgent VsaTap VsaPrivileged                  # журнал
 ```
 В журнале звонка главное: `both legs connected` и `media bridged` - звук соединён;
 `levels downPeak/upPeak` ненулевые с обеих сторон = слышно в обе стороны (`upPeak=0` - обычно не
-выдан микрофон софтфону). Все adb-команды настроек - в [`docs/settings-ru.md`](docs/settings-ru.md), раздел 7.
+выдан микрофон софтфону). Все adb-команды настроек - в [`docs/settings-ru.md`](../settings-ru.md), раздел 7.
 
 ---
 
@@ -335,9 +335,9 @@ export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-17.0.20.101-hotspot"
 (GPL-2.0-or-later), OpenSSL (Apache-2.0) и libopus (BSD-3-Clause). **Наш форк по умолчанию
 собирается на чисто-Kotlin SIP-стеке без нативного pjsip**, поэтому в дефолтной сборке этих
 библиотек нет. Если включать `pjsua2`-стек - вернутся и их лицензии (см. упоминание в
-[`README.upstream.md`](README.upstream.md)).
+[`README.upstream.md`](README.voice-sip-agent.md)).
 
-Оригинальный README сохранён как [`README.upstream.md`](README.upstream.md).
+Оригинальный README сохранён как [`README.upstream.md`](README.voice-sip-agent.md).
 
 **Credits.** Код писал Claude (Anthropic) по задачам владельца; владелец ставил задачи и
 тестировал каждую сборку на живом устройстве.
