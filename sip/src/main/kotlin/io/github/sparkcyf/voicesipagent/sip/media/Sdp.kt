@@ -12,22 +12,28 @@ data class SdpAudio(
     /** True if the m-line asked for RTP/SAVP (SRTP). */
     val secure: Boolean = false,
 ) {
-    /** First payload type in the peer's preference order that we can decode. */
-    fun firstSupportedCodec(): AudioCodec? {
-        for (pt in payloadTypes) {
-            val name = rtpmap[pt]?.substringBefore('/')
-            val codec = if (name != null) AudioCodec.byName(name) else AudioCodec.entries.firstOrNull { it.payloadType == pt }
-            if (codec != null && (rtpmap[pt] == null || rtpmap[pt]!!.contains("/8000"))) return codec
-        }
-        return null
+    /** The codec a payload type stands for (rtpmap name + clock rate, or a static type). */
+    fun codecFor(pt: Int): AudioCodec? {
+        val map = rtpmap[pt] ?: return AudioCodec.entries.firstOrNull { !it.isDynamic && it.payloadType == pt }
+        val parts = map.split('/')
+        val rate = parts.getOrNull(1)?.trim()?.toIntOrNull() ?: return null
+        val channels = parts.getOrNull(2)?.trim()?.toIntOrNull() ?: 1
+        return if (channels == 1) AudioCodec.byName(parts[0].trim(), rate) else null
     }
 
-    fun payloadFor(codec: AudioCodec): Int =
-        payloadTypes.firstOrNull { pt -> rtpmap[pt]?.substringBefore('/')?.equals(codec.encodingName, true) ?: (pt == codec.payloadType) }
-            ?: codec.payloadType
+    /** First payload type in the peer's preference order that we can decode and are allowed to use. */
+    fun firstSupportedCodec(allowed: Collection<AudioCodec> = AudioCodec.entries): AudioCodec? =
+        payloadTypes.firstNotNullOfOrNull { pt -> codecFor(pt)?.takeIf { it in allowed } }
 
-    val telephoneEventPt: Int?
-        get() = rtpmap.entries.firstOrNull { it.value.startsWith("telephone-event/8000", ignoreCase = true) && it.key in payloadTypes }?.key
+    fun payloadFor(codec: AudioCodec): Int = payloadTypes.firstOrNull { codecFor(it) == codec } ?: codec.payloadType
+
+    /** RFC 4733 event payload type, preferring one whose clock matches [rate]. */
+    fun telephoneEventPt(rate: Int = 8000): Int? {
+        val te = rtpmap.entries.filter { it.value.startsWith("telephone-event/", ignoreCase = true) && it.key in payloadTypes }
+        return (te.firstOrNull { it.value.substringAfter('/').substringBefore('/').trim() == rate.toString() } ?: te.firstOrNull())?.key
+    }
+
+    val telephoneEventPt: Int? get() = telephoneEventPt(8000)
 
     /** True if the peer is not going to send us audio / doesn't want ours (hold). */
     val isOnHold: Boolean get() = address == "0.0.0.0" || direction == "sendonly" || direction == "inactive"
@@ -59,9 +65,10 @@ object Sdp {
         sb.append("c=IN IP4 $localIp\r\n")
         sb.append("t=0 0\r\n")
         sb.append("m=audio $rtpPort ${if (crypto != null && savp) "RTP/SAVP" else "RTP/AVP"} ${pts.joinToString(" ")}\r\n")
-        for ((pt, codec) in codecs) sb.append("a=rtpmap:$pt ${codec.encodingName}/8000\r\n")
+        for ((pt, codec) in codecs) sb.append("a=rtpmap:$pt ${codec.encodingName}/${codec.clockRate}\r\n")
         if (telephoneEventPt != null) {
-            sb.append("a=rtpmap:$telephoneEventPt telephone-event/8000\r\n")
+            // Events use the clock of the first (preferred) codec.
+            sb.append("a=rtpmap:$telephoneEventPt telephone-event/${codecs.firstOrNull()?.second?.clockRate ?: 8000}\r\n")
             sb.append("a=fmtp:$telephoneEventPt 0-16\r\n")
         }
         if (crypto != null) sb.append("a=crypto:${crypto.tag} ${SrtpContext.SUITE} inline:${crypto.inlineKey}\r\n")

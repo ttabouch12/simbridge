@@ -2,7 +2,7 @@ package io.github.sparkcyf.voicesipagent.sip.media
 
 import io.github.sparkcyf.voicesipagent.voice.FrameClockListener
 import io.github.sparkcyf.voicesipagent.voice.MediaPort
-import io.github.sparkcyf.voicesipagent.voice.VoiceFormat
+import io.github.sparkcyf.voicesipagent.voice.PcmFormat
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -35,8 +35,11 @@ class RtpSession(
     private val ssrc = SecureRandom().nextInt()
     private var seq = SecureRandom().nextInt(0xffff)
     private var ts = SecureRandom().nextInt().toLong() and 0xffffffffL
-    private val jitter = JitterBuffer()
-    private val sendBuf = ByteArray(12 + 1024 + SrtpContext.TAG_LEN)
+    private val frameSamples = params.codec.frameSamples
+    private val samplesPerMs = params.codec.clockRate / 1000
+    override val format: PcmFormat = PcmFormat(params.codec.clockRate)
+    private val jitter = JitterBuffer(frameSamples = frameSamples)
+    private val sendBuf = ByteArray(12 + 2048 + SrtpContext.TAG_LEN)
     private val dtmfQueue = ConcurrentLinkedQueue<Pair<Char, Int>>()
     private var dtmfTx: DtmfTx? = null
     private var dtmfGapFrames = 0
@@ -44,7 +47,7 @@ class RtpSession(
 
     @Volatile private var closed = false
     private var remoteSsrc: Int? = null
-    private val rxDtmf = DtmfRx()
+    private val rxDtmf = DtmfRx(params.codec.clockRate / 1000)
     private val rxThread = Thread(::receiveLoop, "rtp-rx-${socket.localPort}").apply { isDaemon = true }
 
     @Volatile var packetsSent = 0L
@@ -73,7 +76,7 @@ class RtpSession(
     override fun setClockListener(listener: FrameClockListener?) {}
 
     override fun readFrame(): ShortArray {
-        val out = ShortArray(VoiceFormat.FRAME_SAMPLES)
+        val out = ShortArray(frameSamples)
         jitter.read(out)
         return out
     }
@@ -87,11 +90,11 @@ class RtpSession(
         if (closed) return
         val p = params
         if (dtmfTx == null && dtmfGapFrames == 0 && p.telephoneEventPt != null) {
-            dtmfQueue.poll()?.let { (d, ms) -> dtmfTx = DtmfTx(DtmfRx.eventCode(d)!!, ts, ms * 8) }
+            dtmfQueue.poll()?.let { (d, ms) -> dtmfTx = DtmfTx(DtmfRx.eventCode(d)!!, ts, ms * samplesPerMs) }
         }
         val tx = dtmfTx
         if (tx != null && p.telephoneEventPt != null) {
-            tx.elapsed += VoiceFormat.FRAME_SAMPLES
+            tx.elapsed += frameSamples
             val ending = tx.elapsed >= tx.totalSamples
             val reps = if (ending) 3 else 1
             repeat(reps) {
@@ -110,9 +113,9 @@ class RtpSession(
             writeHeader(p.payloadType, marker = firstPacket, timestamp = ts)
             firstPacket = false
             p.codec.encode(frame, sendBuf, 12)
-            send(12 + frame.size, p)
+            send(12 + frame.size * p.codec.bytesPerSample, p)
         }
-        ts = (ts + VoiceFormat.FRAME_SAMPLES) and 0xffffffffL
+        ts = (ts + frameSamples) and 0xffffffffL
     }
 
     private fun writeHeader(pt: Int, marker: Boolean, timestamp: Long) {
@@ -183,7 +186,8 @@ class RtpSession(
             when {
                 pt == p.telephoneEventPt && end - off >= 4 -> rxDtmf.onPacket(timestamp, buf, off).forEach { (d, ms) -> onDtmf(d, ms) }
                 pt == p.payloadType || pt == p.codec.payloadType -> jitter.put(timestamp, p.codec.decode(buf, off, end - off))
-                else -> AudioCodec.entries.firstOrNull { it.payloadType == pt }?.let { jitter.put(timestamp, it.decode(buf, off, end - off)) }
+                else -> AudioCodec.entries.firstOrNull { !it.isDynamic && it.payloadType == pt && it.clockRate == p.codec.clockRate }
+                    ?.let { jitter.put(timestamp, it.decode(buf, off, end - off)) }
             }
         }
     }
@@ -201,7 +205,7 @@ class RtpSession(
     }
 
     /** RFC 4733 receiver: reports each event once, at its end packet. */
-    private class DtmfRx {
+    private class DtmfRx(private val samplesPerMs: Int) {
         private var currentTs = -1L
         private var reportedTs = -1L
         private var currentEvent = -1
@@ -214,14 +218,14 @@ class RtpSession(
             val out = ArrayList<Pair<Char, Int>>(2)
             if (ts != currentTs) {
                 // A new event began before we saw the previous one's end packets: report it now.
-                if (currentTs >= 0 && reportedTs != currentTs) digit(currentEvent)?.let { out += it to maxOf(currentDuration / 8, 40) }
+                if (currentTs >= 0 && reportedTs != currentTs) digit(currentEvent)?.let { out += it to maxOf(currentDuration / samplesPerMs, 40) }
                 currentTs = ts
                 currentEvent = event
             }
             currentDuration = duration
             if (endBit && reportedTs != ts) {
                 reportedTs = ts
-                digit(event)?.let { out += it to maxOf(duration / 8, 40) }
+                digit(event)?.let { out += it to maxOf(duration / samplesPerMs, 40) }
             }
             return out
         }

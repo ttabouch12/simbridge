@@ -42,7 +42,8 @@ class ControlReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val core = LinkApp.core(context)
         when (intent.getStringExtra("op")) {
-            "password" -> { core.setPassword(intent.getStringExtra("password") ?: ""); Log.i("control: password set") }
+            "pair" -> PairedGateway.parse(intent.getStringExtra("link") ?: "")?.let(core::pair)
+                ?: Log.w("control: bad pairing link")
             "reconnect" -> core.reconnect()
             "status" -> Log.i("control: status=${core.status.value} ua=${core.ua?.status} account=${Telecom.isEnabled(context)}")
             "send" -> core.sendText(intent.getStringExtra("to") ?: return, intent.getStringExtra("text") ?: return)

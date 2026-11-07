@@ -49,6 +49,13 @@ import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.Button
+import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material.icons.rounded.QrCode2
+import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.Image
+import android.widget.Toast
+import android.graphics.Bitmap
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ColorScheme
@@ -330,30 +337,71 @@ private fun NetworkCard(addresses: List<Pair<String, String>>, port: Int) {
 
 @Composable
 private fun SecurityCard(rt: GatewayRuntime, current: String) {
-    var editing by remember { mutableStateOf(false) }
-    var pw by remember(current) { mutableStateOf(current) }
+    val ctx = LocalContext.current
+    var showQr by remember { mutableStateOf(false) }
+    var qrPassword by remember { mutableStateOf("") }
+    var confirmReset by remember { mutableStateOf(false) }
+    var legacy by remember { mutableStateOf(rt.pairing.legacyUdp) }
+    val fp = remember(current) { runCatching { rt.pairing.fingerprint() }.getOrDefault("") }
     GroupCard("Security") {
-        val protected = current.isNotEmpty()
+        val ok = current.isNotEmpty()
         ListItem(
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            leadingContent = { Icon(if (protected) Icons.Rounded.Lock else Icons.Rounded.LockOpen, null,
-                tint = if (protected) Good else Warn) },
-            headlineContent = { Text(if (protected) "Password protected" else "No password") },
-            supportingContent = { Text(if (protected) "Only your main phone (with the password) can use this SIM"
-                else "Any device on the same Wi-Fi could connect") },
-            trailingContent = { TextButton(onClick = { editing = !editing }) { Text(if (editing) "Close" else "Change") } },
+            leadingContent = { Icon(if (ok) Icons.Rounded.Lock else Icons.Rounded.LockOpen, null, tint = if (ok) Good else Warn) },
+            headlineContent = { Text(if (ok) "Encrypted link" else "Not paired yet") },
+            supportingContent = { Text(if (ok) "TLS + SRTP. Only phones that scanned this phone's code can connect. Key ${fp.take(8)}"
+                else "Pair your main phone to start") },
         )
-        AnimatedVisibility(editing) {
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(pw, { pw = it }, label = { Text("Gateway password") }, singleLine = true,
-                    leadingIcon = { Icon(Icons.Rounded.Key, null) },
-                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-                Text("Enter the same password in SimBridge on the main phone (Settings → Gateway password).",
-                    style = MaterialTheme.typography.bodySmall)
-                Button(onClick = { rt.setRegistrarPassword(pw); editing = false }) { Text("Save") }
-            }
+        Row(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = {
+                qrPassword = if (current.isEmpty()) rt.resetPairing() else current
+                showQr = true
+            }) { Icon(Icons.Rounded.QrCode2, null); Spacer(Modifier.width(8.dp)); Text("Pair a phone") }
+            TextButton(onClick = { confirmReset = true }) { Text("New key") }
         }
+        ListItem(
+            modifier = Modifier.clickable { legacy = !legacy; rt.setLegacyUdp(legacy) },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            leadingContent = { Icon(Icons.Rounded.Warning, null, tint = if (legacy) Warn else MaterialTheme.colorScheme.onSurfaceVariant) },
+            headlineContent = { Text("Allow other SIP apps") },
+            supportingContent = { Text("Plain SIP/UDP on port 5062 for apps like baresip. Unencrypted: leave off unless you need it.") },
+            trailingContent = { Switch(legacy, { legacy = it; rt.setLegacyUdp(it) }) },
+        )
     }
+    if (showQr) {
+        val uri = remember(qrPassword) { rt.pairing.pairingUri(qrPassword) }
+        val bmp = remember(uri) { qrBitmap(uri, 720) }
+        AlertDialog(
+            onDismissRequest = { showQr = false },
+            icon = { Icon(Icons.Rounded.QrCode2, null) },
+            title = { Text("Scan with SimBridge") },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Image(bmp.asImageBitmap(), "Pairing code", Modifier.size(260.dp).clip(RoundedCornerShape(12.dp)))
+                    Spacer(Modifier.height(12.dp))
+                    Text("On your main phone: SimBridge → Settings → Pair with SIM phone. " +
+                        "This code contains the password: don't share it.", style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = { TextButton({ showQr = false }) { Text("Done") } },
+            dismissButton = { TextButton({ copy(ctx, uri); Toast.makeText(ctx, "Pairing link copied", Toast.LENGTH_SHORT).show() }) { Text("Copy link") } },
+        )
+    }
+    if (confirmReset) AlertDialog(
+        onDismissRequest = { confirmReset = false },
+        icon = { Icon(Icons.Rounded.Warning, null) },
+        title = { Text("Make a new key?") },
+        text = { Text("Every paired phone is disconnected and must scan the new code. Use this if you lost a paired phone.") },
+        confirmButton = { TextButton({ qrPassword = rt.resetPairing(); confirmReset = false; showQr = true }) { Text("New key") } },
+        dismissButton = { TextButton({ confirmReset = false }) { Text("Cancel") } },
+    )
+}
+
+private fun qrBitmap(text: String, size: Int): Bitmap {
+    val m = com.google.zxing.qrcode.QRCodeWriter().encode(text, com.google.zxing.BarcodeFormat.QR_CODE, size, size,
+        mapOf(com.google.zxing.EncodeHintType.MARGIN to 1))
+    val px = IntArray(size * size) { i -> if (m.get(i % size, i / size)) 0xFF000000.toInt() else 0xFFFFFFFF.toInt() }
+    return Bitmap.createBitmap(px, size, size, Bitmap.Config.ARGB_8888)
 }
 
 @Composable
@@ -384,6 +432,5 @@ fun AdvancedScaffold(onBack: () -> Unit, content: @Composable (Modifier) -> Unit
     }) { pad -> content(Modifier.padding(pad)) }
 }
 
-@Suppress("unused")
 private fun copy(ctx: Context, text: String) =
     ctx.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("gateway", text))

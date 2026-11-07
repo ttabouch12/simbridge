@@ -20,11 +20,22 @@ class PrivilegedAudioOpener(
 
     override fun open(onLost: (String) -> Unit): CallAudioHandle = synchronized(lock) {
         val svc = shizuku.service ?: error("privileged service not connected (${shizuku.state})")
-        val pcm = format()
+        val pcm0 = format()
         val selectedMethod = method()
         val suppressLocal = muteEarpiece()
         val ticket = ++generation
-        val pfd = svc.openCallAudio(selectedMethod, pcm.sampleRate)
+        // HD voice: try the call's rate first; if this phone's tap can't do 16 kHz, fall back to
+        // 8 kHz (the bridge resamples).
+        var pcm = pcm0
+        val pfd = try {
+            svc.openCallAudio(selectedMethod, pcm.sampleRate)
+        } catch (e: Exception) {
+            if (pcm.sampleRate == 8000) throw e
+            AppLog.w("16 kHz call audio unavailable (${e.message}); using 8 kHz")
+            runCatching { svc.closeCallAudio() }
+            pcm = PcmFormat.NARROWBAND
+            svc.openCallAudio(selectedMethod, 8000)
+        }
         var constructed: PcmSocketPort? = null
         val port = try {
             createPort(pfd, pcm, onLost).also { constructed = it; it.start() }

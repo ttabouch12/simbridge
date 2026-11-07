@@ -184,7 +184,7 @@ internal class SipCall(
                 return
             }
             val answer = Sdp.parse(r.bodyText)
-            val codec = answer?.firstSupportedCodec()
+            val codec = answer?.firstSupportedCodec(config.codecs)
             if (answer == null || codec == null || !srtpAcceptable(answer)) {
                 log.warn("call $id: unusable SDP answer${if (answer != null && codec != null) " (no SRTP)" else ""}")
                 sendBye()
@@ -251,8 +251,8 @@ internal class SipCall(
         routeSet = req.headers.getAll("Record-Route")
         tx.respond(ua.buildResponse(req, 100))
         val sdp = if (req.contentType == "application/sdp") Sdp.parse(req.bodyText) else null
-        if (sdp == null || sdp.firstSupportedCodec() == null || !srtpAcceptable(sdp)) {
-            log.warn("call $id: no acceptable SDP offer${if (sdp != null && sdp.firstSupportedCodec() != null) " (SRTP required)" else ""}")
+        if (sdp == null || sdp.firstSupportedCodec(config.codecs) == null || !srtpAcceptable(sdp)) {
+            log.warn("call $id: no acceptable SDP offer${if (sdp != null && sdp.firstSupportedCodec(config.codecs) != null) " (SRTP required)" else ""}")
             tx.respond(ua.buildResponse(req, 488, localTag))
             return false
         }
@@ -272,12 +272,12 @@ internal class SipCall(
         val tx = inviteServerTx ?: return
         val sdp = offer ?: return
         if (direction != LegDirection.INBOUND || tx.isFinal || state >= LegState.CONNECTED) return
-        val codec = sdp.firstSupportedCodec()!!
+        val codec = sdp.firstSupportedCodec(config.codecs)!!
         val resp = ua.buildResponse(tx.request, 200, localTag)
         resp.headers.add("Contact", "<${ua.contactUri()}>")
         ua.addCapabilities(resp)
         resp.headers.add("Content-Type", "application/sdp")
-        resp.body = localSdp(listOf(sdp.payloadFor(codec) to codec), sdp.telephoneEventPt, Sdp.answerDirection(sdp.direction),
+        resp.body = localSdp(listOf(sdp.payloadFor(codec) to codec), sdp.telephoneEventPt(codec.clockRate), Sdp.answerDirection(sdp.direction),
             cryptoFor(sdp), sdp.secure).toByteArray()
         tx.onAckTimeout = {
             if (state == LegState.CONNECTED) {
@@ -343,14 +343,14 @@ internal class SipCall(
         resp.headers.add("Contact", "<${ua.contactUri()}>")
         val cur = rtpParams
         if (sdp != null) {
-            val codec = sdp.firstSupportedCodec()
+            val codec = sdp.firstSupportedCodec(config.codecs)
             if (codec == null || !srtpAcceptable(sdp)) {
                 tx.respond(ua.buildResponse(req, 488))
                 return
             }
             applyRemoteSdp(sdp)
             resp.headers.add("Content-Type", "application/sdp")
-            resp.body = localSdp(listOf(sdp.payloadFor(codec) to codec), sdp.telephoneEventPt, Sdp.answerDirection(sdp.direction),
+            resp.body = localSdp(listOf(sdp.payloadFor(codec) to codec), sdp.telephoneEventPt(codec.clockRate), Sdp.answerDirection(sdp.direction),
                 cryptoFor(sdp), sdp.secure).toByteArray()
         } else if (cur != null && isInvite) {
             // Offerless re-INVITE: we offer what we have; the answer arrives in the ACK.
@@ -363,7 +363,7 @@ internal class SipCall(
     }
 
     private fun applyRemoteSdp(sdp: SdpAudio) {
-        val codec = sdp.firstSupportedCodec() ?: return
+        val codec = sdp.firstSupportedCodec(config.codecs) ?: return
         if (!srtpAcceptable(sdp)) { log.warn("call $id: ignoring SDP without SRTP"); return }
         val p = paramsFor(sdp, codec)
         if (p != rtpParams) log.info("call $id media update: ${codec.name} hold=${sdp.isOnHold}")
@@ -441,7 +441,7 @@ internal class SipCall(
         remote = InetSocketAddress(InetAddress.getByName(sdp.address), sdp.port),
         codec = codec,
         payloadType = sdp.payloadFor(codec),
-        telephoneEventPt = sdp.telephoneEventPt,
+        telephoneEventPt = sdp.telephoneEventPt(codec.clockRate),
         sendEnabled = !sdp.isOnHold && sdp.port != 0,
         srtpTx = if (canSrtp(sdp)) srtpTx else null,
         srtpRx = if (canSrtp(sdp)) rxContext(sdp) else null,
@@ -482,10 +482,17 @@ internal class SipCall(
         }
     }
 
+    /**
+     * The PCM rate this call runs at: the negotiated codec, or (inbound, not answered yet) the
+     * codec we'll pick from the offer. The gateway opens cellular audio at the same rate.
+     */
+    val negotiatedRate: Int?
+        get() = rtpParams?.codec?.clockRate ?: offer?.firstSupportedCodec(config.codecs)?.clockRate
+
     /** Diagnostics for UIs and logs. */
     val mediaStats: String
         get() = rtp?.let {
-            "rtp tx=${it.packetsSent} rx=${it.packetsReceived} underruns=${it.jitterUnderruns}" +
+            "${rtpParams?.codec?.name} rtp tx=${it.packetsSent} rx=${it.packetsReceived} underruns=${it.jitterUnderruns}" +
                 (if (rtpParams?.srtpTx != null) " srtp authFail=${it.authFailures}" else " plain")
         } ?: "no media"
 }

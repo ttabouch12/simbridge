@@ -55,23 +55,42 @@ object G711 {
     }
 }
 
-enum class AudioCodec(val payloadType: Int, val encodingName: String) {
-    PCMU(0, "PCMU"),
-    PCMA(8, "PCMA");
+/**
+ * Payload formats. G.711 is 8 kHz narrowband. L16/16000 (RFC 3551 linear PCM, big-endian) is
+ * uncompressed 16 kHz wideband ("HD voice"): ~256 kbit/s, fine on Wi-Fi between two phones.
+ */
+enum class AudioCodec(val payloadType: Int, val encodingName: String, val clockRate: Int) {
+    PCMU(0, "PCMU", 8000),
+    PCMA(8, "PCMA", 8000),
+    L16_16K(118, "L16", 16000);
+
+    /** Samples per 20 ms frame. */
+    val frameSamples: Int get() = clockRate / 50
+
+    /** Bytes one sample takes on the wire. */
+    val bytesPerSample: Int get() = if (this == L16_16K) 2 else 1
+
+    val isDynamic: Boolean get() = payloadType >= 96
 
     fun encode(pcm: ShortArray, out: ByteArray, offset: Int = 0) {
         when (this) {
             PCMU -> for (i in pcm.indices) out[offset + i] = G711.ulawEncode(pcm[i])
             PCMA -> for (i in pcm.indices) out[offset + i] = G711.alawEncode(pcm[i])
+            L16_16K -> for (i in pcm.indices) {
+                val v = pcm[i].toInt()
+                out[offset + 2 * i] = (v shr 8).toByte(); out[offset + 2 * i + 1] = v.toByte()
+            }
         }
     }
 
     fun decode(data: ByteArray, offset: Int, length: Int): ShortArray = when (this) {
         PCMU -> ShortArray(length) { G711.ulawDecode(data[offset + it]) }
         PCMA -> ShortArray(length) { G711.alawDecode(data[offset + it]) }
+        L16_16K -> ShortArray(length / 2) { ((data[offset + 2 * it].toInt() shl 8) or (data[offset + 2 * it + 1].toInt() and 0xff)).toShort() }
     }
 
     companion object {
-        fun byName(name: String): AudioCodec? = entries.firstOrNull { it.encodingName.equals(name, ignoreCase = true) }
+        fun byName(name: String, rate: Int = 8000): AudioCodec? =
+            entries.firstOrNull { it.encodingName.equals(name, ignoreCase = true) && it.clockRate == rate }
     }
 }

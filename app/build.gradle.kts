@@ -80,6 +80,8 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
+    // QR code for pairing (Apache-2.0)
+    implementation("com.google.zxing:core:3.5.3")
     implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
     testImplementation(libs.mockito.core)

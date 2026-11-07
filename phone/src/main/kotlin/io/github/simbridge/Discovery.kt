@@ -12,6 +12,9 @@ import java.util.concurrent.Executors
 /** Where the SIM phone might be, best guess first. */
 data class Candidate(val host: String, val port: Int, val via: String)
 
+/** A gateway seen on the network: TLS port and its random id (from the mDNS TXT record). */
+private data class Seen(val tlsPort: Int, val id: String?, val at: Long)
+
 /**
  * Finds the SIM phone gateway without any typed IP address:
  *  1. mDNS/DNS-SD: the gateway advertises "_simbridge._udp" on every network it is on.
@@ -22,7 +25,7 @@ class Discovery(private val context: Context, private val onChange: () -> Unit) 
     private val nsd = context.getSystemService(NsdManager::class.java)
     private val cm = context.getSystemService(ConnectivityManager::class.java)
     private val executor = Executors.newSingleThreadExecutor()
-    private val found = ConcurrentHashMap<String, Pair<Int, Long>>()   // host -> (port, seen at)
+    private val found = ConcurrentHashMap<String, Seen>()   // host -> what it advertised
     private val infoCallbacks = ConcurrentHashMap<String, NsdManager.ServiceInfoCallback>()
     private var discovery: NsdManager.DiscoveryListener? = null
 
@@ -61,9 +64,13 @@ class Discovery(private val context: Context, private val onChange: () -> Unit) 
             override fun onServiceInfoCallbackRegistrationFailed(code: Int) { infoCallbacks.remove(info.serviceName) }
             override fun onServiceUpdated(s: NsdServiceInfo) {
                 var changed = false
+                val attrs = s.attributes
+                val tls = attrs["tls"]?.let { String(it) }?.toIntOrNull() ?: s.port
+                val id = attrs["id"]?.let { String(it) }
                 s.hostAddresses.filterIsInstance<Inet4Address>().forEach { a ->
                     val host = a.hostAddress ?: return@forEach
-                    if (found.put(host, s.port to System.currentTimeMillis())?.first != s.port) changed = true
+                    val prev = found.put(host, Seen(tls, id, System.currentTimeMillis()))
+                    if (prev?.tlsPort != tls || prev.id != id) changed = true
                 }
                 if (changed) { Log.i("mDNS: SIM phone found at ${found.keys}"); onChange() }
             }
@@ -89,17 +96,22 @@ class Discovery(private val context: Context, private val onChange: () -> Unit) 
         return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
 
-    fun candidates(lastHost: String?, lastPort: Int): List<Candidate> {
+    /**
+     * Where the paired gateway [id] might be, best first: its own mDNS announcement, then the
+     * Wi-Fi gateway address (the SIM phone when we're on its hotspot), then the last address
+     * that worked. Gateways announcing a different id are skipped. TLS pinning stops impostors.
+     */
+    fun candidates(id: String, tlsPort: Int, lastHost: String?): List<Candidate> {
         val out = LinkedHashMap<String, Candidate>()
-        found.entries.sortedByDescending { it.value.second }
-            .forEach { out.putIfAbsent(it.key, Candidate(it.key, it.value.first, "mdns")) }
-        wifiGateway()?.let { out.putIfAbsent(it, Candidate(it, DEFAULT_PORT, "gateway")) }
-        lastHost?.let { out.putIfAbsent(it, Candidate(it, lastPort, "last")) }
+        found.entries.filter { it.value.id == id }.sortedByDescending { it.value.at }
+            .forEach { out.putIfAbsent(it.key, Candidate(it.key, it.value.tlsPort, "mdns")) }
+        val others = found.filterValues { it.id != null && it.id != id }.keys
+        wifiGateway()?.takeIf { it !in others }?.let { out.putIfAbsent(it, Candidate(it, tlsPort, "gateway")) }
+        lastHost?.takeIf { it !in others }?.let { out.putIfAbsent(it, Candidate(it, tlsPort, "last")) }
         return out.values.toList()
     }
 
     companion object {
         const val SERVICE_TYPE = "_simbridge._udp"
-        const val DEFAULT_PORT = 5062
     }
 }

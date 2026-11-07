@@ -189,15 +189,23 @@ class CallBridgeTest {
         assertTrue(sipPort.written.single().all { it == 11.toShort() })
     }
 
-    @Test fun incompatibleFormatsEndTheCall() {
+    @Test fun narrowbandAndWidebandAreResampledNotDropped() {
         val a = cell.incoming("13800001234"); settle()
         val b = sip.dialed.single()
         b.remoteAnswered(); settle()
         val cellPort = FakePort(true, 11, PcmFormat.WIDEBAND)
         a.mediaUp(cellPort); b.mediaUp(FakePort(false, 22)); settle()
-        assertNull(bridge.session)
-        assertEquals(HangupCause.INTERNAL_ERROR, a.endCause)
-        assertEquals(HangupCause.INTERNAL_ERROR, b.endCause)
-        assertNull(cellPort.clock)
+        assertNotNull(bridge.session?.media)
+        assertNull(a.endCause)
+        assertNotNull(cellPort.clock)
+    }
+
+    @Test fun resamplerKeepsFrameSizesAndLevel() {
+        val narrow = FakePort(false, 1000)
+        val wide = ResamplingPort(narrow, PcmFormat.WIDEBAND)
+        assertEquals(320, wide.readFrame().size)
+        wide.writeFrame(ShortArray(320) { 2000 })
+        val back = ResamplingPort(FakePort(false, 1000, PcmFormat.WIDEBAND), PcmFormat.NARROWBAND)
+        assertEquals(160, back.readFrame().size)
     }
 }

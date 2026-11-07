@@ -11,8 +11,9 @@ import java.util.TreeMap
 class JitterBuffer(
     private val targetFrames: Int = 3,
     private val maxFrames: Int = 10,
+    private val frameSamples: Int = VoiceFormat.FRAME_SAMPLES,
 ) {
-    private val frame = VoiceFormat.FRAME_SAMPLES.toLong()
+    private val frame = frameSamples.toLong()
     private val packets = TreeMap<Long, ShortArray>()
     private var highestTs = -1L
     private var playTs = -1L
@@ -62,7 +63,7 @@ class JitterBuffer(
             dropped++
         }
         var got = false
-        for (i in 0 until VoiceFormat.FRAME_SAMPLES) {
+        for (i in 0 until frameSamples) {
             val p = playTs + i
             val e = packets.floorEntry(p) ?: continue
             val off = (p - e.key).toInt()

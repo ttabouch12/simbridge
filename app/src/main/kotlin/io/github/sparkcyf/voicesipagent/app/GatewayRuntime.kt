@@ -26,6 +26,10 @@ import io.github.sparkcyf.voicesipagent.sip.SipAccount
 import io.github.sparkcyf.voicesipagent.sip.SipConfig
 import io.github.sparkcyf.voicesipagent.sip.SipLog
 import io.github.sparkcyf.voicesipagent.sip.SipUserAgent
+import io.github.sparkcyf.voicesipagent.sip.TlsSettings
+import io.github.sparkcyf.voicesipagent.sip.LanSourceFilter
+import io.github.sparkcyf.voicesipagent.sip.SrtpMode
+import io.github.sparkcyf.voicesipagent.sip.media.AudioCodec
 import io.github.sparkcyf.voicesipagent.telephony.CellularEndpoint
 import io.github.sparkcyf.voicesipagent.telephony.CallSnapshot
 import io.github.sparkcyf.voicesipagent.telephony.GatewayInCallService
@@ -103,12 +107,29 @@ class GatewayRuntime private constructor(context: Context) {
     })
     val health: StateFlow<HealthState> = _health
     private val advertiser by lazy { GatewayAdvertiser(app) }
+    val pairing by lazy { Pairing(app) }
+
+    /** New key + password: unpairs all phones. Returns the new password. */
+    fun resetPairing(): String {
+        val pw = pairing.reset()
+        setRegistrarPassword(pw)
+        return pw
+    }
+
+    fun setLegacyUdp(on: Boolean) = worker.execute {
+        pairing.legacyUdp = on
+        startSip()
+    }
     private val _dialerMessage = MutableStateFlow("")
     val dialerMessage: StateFlow<String> = _dialerMessage
 
     val shizuku = ShizukuConnector(app) { AppLog.i(it) }
-    // Built-in Kotlin SIP stack is G.711 (narrowband) only.
-    private fun audioFormat() = if (_health.value.loopbackTest) PcmFormat.WIDEBAND else PcmFormat.NARROWBAND
+    // Cellular audio opens at the rate the phone link negotiated: 16 kHz for HD voice (L16), else 8 kHz.
+    private fun audioFormat() = when {
+        _health.value.loopbackTest -> PcmFormat.WIDEBAND
+        (sip as? SipUserAgent)?.activeCallRate() == 16000 -> PcmFormat.WIDEBAND
+        else -> PcmFormat.NARROWBAND
+    }
 
     val cellular = CellularEndpoint(app,
         PrivilegedAudioOpener(shizuku, { settings.audioMethod }, { settings.muteEarpiece }, ::audioFormat),
@@ -547,7 +568,7 @@ class GatewayRuntime private constructor(context: Context) {
             _health.update { it.copy(sip = EndpointStatus(false, "unknown srtp ${s.srtp}")) }
             return
         }
-        if (transport == null || transport != SipTransport.UDP) {
+        if (!s.serverMode && (transport == null || transport != SipTransport.UDP)) {
             AppLog.w("SIP transport '${s.sipTransport}' not supported by the built-in stack (UDP only)")
             _health.update { it.copy(sip = EndpointStatus(false, "transport ${s.sipTransport} unsupported (UDP only)")) }
             return
@@ -567,6 +588,16 @@ class GatewayRuntime private constructor(context: Context) {
                     serverMode = s.serverMode,
                     registrarLeaseSec = s.registrarLeaseSec,
                     registrarPassword = s.registrarPassword,
+                    // Device-in-itself: SimBridge phones use pinned TLS + SRTP; plain UDP only if
+                    // the user allows other SIP apps. Nothing is accepted over mobile data.
+                    tls = if (s.serverMode) runCatching { TlsSettings(pairing.serverContext(), pairing.tlsPort) }
+                        .onFailure { AppLog.w("TLS unavailable", it) }.getOrNull() else null,
+                    udpEnabled = !s.serverMode || pairing.legacyUdp,
+                    sourceFilter = if (s.serverMode) LanSourceFilter(LanSourceFilter::notMobile) else null,
+                    srtp = if (s.serverMode && !pairing.legacyUdp) SrtpMode.REQUIRED else SrtpMode.OPTIONAL,
+                    authEveryRequest = true,
+                    codecs = if (s.serverMode && pairing.hdVoice) listOf(AudioCodec.L16_16K, AudioCodec.PCMU, AudioCodec.PCMA)
+                        else listOf(AudioCodec.PCMU, AudioCodec.PCMA),
                 ),
                 sipLog,
             ).also { ua ->
@@ -574,7 +605,9 @@ class GatewayRuntime private constructor(context: Context) {
                 ua.outgoingMessageHandler = { to, text -> sendSmsFromPhone(to, text) }
                 ua.start()
             }
-            if (s.serverMode) advertiser.start(s.localSipPort)
+            if (s.serverMode) (ep as SipUserAgent).let { ua ->
+                advertiser.start(ua.tlsPort ?: pairing.tlsPort, ua.udpPort, pairing.gatewayId)
+            }
             sip = ep
             _health.update { it.copy(sip = ep.status) }
             AppLog.i("SIP stack: built-in${if (s.serverMode) " (server mode)" else ""}")

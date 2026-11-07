@@ -11,6 +11,10 @@ import io.github.sparkcyf.voicesipagent.sip.SipAccount
 import io.github.sparkcyf.voicesipagent.sip.SipConfig
 import io.github.sparkcyf.voicesipagent.sip.SipLog
 import io.github.sparkcyf.voicesipagent.sip.SipUserAgent
+import io.github.sparkcyf.voicesipagent.sip.SrtpMode
+import io.github.sparkcyf.voicesipagent.sip.media.AudioCodec
+import io.github.sparkcyf.voicesipagent.sip.TlsPinning
+import io.github.sparkcyf.voicesipagent.sip.TlsSettings
 import io.github.sparkcyf.voicesipagent.voice.CallLeg
 import io.github.sparkcyf.voicesipagent.voice.HangupCause
 import kotlinx.coroutines.CompletableDeferred
@@ -58,7 +62,10 @@ class LinkCore(val context: Context) {
 
     private val sipLog = object : SipLog {
         override fun info(msg: String) = Log.i("sip: $msg")
-        override fun warn(msg: String, t: Throwable?) = Log.w("sip: $msg", t)
+        override fun warn(msg: String, t: Throwable?) {
+            if (msg.contains("doesn't match the paired one") || t?.message?.contains("doesn't match the paired one") == true) keyMismatch = true
+            Log.w("sip: $msg", t)
+        }
     }
 
     @Synchronized fun start() {
@@ -72,11 +79,24 @@ class LinkCore(val context: Context) {
 
     fun kick() { kicks.trySend(Unit) }
 
-    fun setPassword(pw: String) {
-        prefs.password = pw
+    /** Stores a pairing scanned from the SIM phone's QR code and connects to it. */
+    fun pair(g: PairedGateway) {
+        prefs.paired = g
+        prefs.lastHost = null
+        keyMismatch = false
+        dropUa()
+        discovery.restart()
+        kick()
+        Log.i("paired with gateway ${g.id} (key ${g.fingerprint.take(8)}…)")
+    }
+
+    fun unpair() {
+        prefs.paired = null
         dropUa()
         kick()
     }
+
+    @Volatile private var keyMismatch = false
 
     fun reconnect() {
         networkChanged = true
@@ -91,9 +111,11 @@ class LinkCore(val context: Context) {
     private suspend fun connectLoop() {
         var notReadySince = 0L
         while (true) {
-            if (prefs.password.isBlank()) {
+            val pg = prefs.paired
+            if (pg == null) {
                 dropUa()
-                _status.value = LinkStatus(LinkState.NEEDS_PASSWORD, detail = "Enter the gateway password")
+                _status.value = LinkStatus(LinkState.NEEDS_PASSWORD, detail =
+                    if (prefs.needsRepair) "Update: scan your SIM phone's code once to turn on encryption" else "Pair with your SIM phone")
                 waitKick(60_000); continue
             }
             val cur = ua
@@ -121,19 +143,20 @@ class LinkCore(val context: Context) {
             }
             _status.value = LinkStatus(LinkState.SEARCHING, detail = "Looking for your SIM phone…")
             val gw = discovery.wifiGateway()
-            for (c in discovery.candidates(prefs.lastHost, prefs.lastPort)) {
-                val u = newUa(c.host, c.port)
+            for (c in discovery.candidates(pg.id, pg.tlsPort, prefs.lastHost)) {
+                val u = newUa(c.host, c.port, pg)
                 if (awaitReady(u, 7_000)) {
                     ua = u
                     prefs.lastHost = c.host
-                    prefs.lastPort = c.port
                     Log.i("connected to SIM phone at ${c.host}:${c.port} (${c.via})")
                     publishConnected(u, c.host == gw)
                     break
                 }
                 Log.i("no SIM phone at ${c.host}:${c.port} (${c.via}): ${u.status.detail}")
                 if (u.status.detail.contains("403") || u.status.detail.contains("401")) {
-                    _status.value = LinkStatus(LinkState.NEEDS_PASSWORD, c.host, detail = "The SIM phone rejected the password")
+                    _status.value = LinkStatus(LinkState.NEEDS_PASSWORD, c.host, detail = "The SIM phone rejected this phone. Scan its code again")
+                } else if (keyMismatch) {
+                    _status.value = LinkStatus(LinkState.NEEDS_PASSWORD, c.host, detail = "The SIM phone's key changed. Scan its code again")
                 }
                 Thread { u.stop(500) }.start()
             }
@@ -161,16 +184,22 @@ class LinkCore(val context: Context) {
         return ok
     }
 
-    private fun newUa(host: String, port: Int): SipUserAgent = SipUserAgent(
+    private fun newUa(host: String, port: Int, pg: PairedGateway): SipUserAgent = SipUserAgent(
         SipConfig(
-            account = SipAccount(server = host, port = port, username = prefs.user, password = prefs.password,
-                domain = host, displayName = android.os.Build.MODEL),
+            account = SipAccount(server = host, port = port, username = prefs.user, password = pg.password,
+                domain = host, displayName = "Phone"),
             localPort = 0,
-            registerExpiresSec = 120,
-            userAgent = "SimBridge/1.0",
+            // Over TLS the CRLF keep-alive notices a dead link, so registration can be lazy (battery).
+            registerExpiresSec = 600,
+            keepAliveSec = 120,
+            userAgent = "SimBridge/2.0",
             rtpTimeoutMs = 20_000,
             ringTimeoutMs = 90_000,
             acceptOnlyFromServer = true,
+            tls = TlsSettings(TlsPinning.clientContext(pg.fingerprint), 0),
+            srtp = SrtpMode.REQUIRED,
+            // HD voice first (16 kHz linear PCM); G.711 if the gateway has it turned off.
+            codecs = listOf(AudioCodec.L16_16K, AudioCodec.PCMU),
         ),
         sipLog,
     ).apply {

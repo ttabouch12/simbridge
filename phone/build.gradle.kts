@@ -63,5 +63,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation(libs.kotlinx.coroutines.android)
+    // QR scanning for pairing via Google Play services (no camera permission needed).
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 }
 

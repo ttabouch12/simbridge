@@ -13,21 +13,26 @@ import android.os.Build
 class GatewayAdvertiser(context: Context) {
     private val nsd = context.getSystemService(NsdManager::class.java)
     private var listener: NsdManager.RegistrationListener? = null
-    private var port = 0
+    private var current = ""
 
-    @Synchronized fun start(sipPort: Int) {
-        if (listener != null && port == sipPort) return
+    /** [tlsPort]: encrypted SimBridge link; [udpPort]: legacy SIP apps (null when off); [id]: random gateway id. */
+    @Synchronized fun start(tlsPort: Int, udpPort: Int?, id: String) {
+        val sig = "$tlsPort/$udpPort/$id"
+        if (listener != null && current == sig) return
         stop()
-        port = sipPort
+        current = sig
         val info = NsdServiceInfo().apply {
-            serviceName = "SimBridge " + Build.MODEL
+            // No device model or name: only a random id, so the network learns nothing about the phone.
+            serviceName = "SimBridge-${id.take(6)}"
             serviceType = SERVICE_TYPE
-            setPort(sipPort)
-            setAttribute("v", "1")
-            setAttribute("model", Build.MODEL)
+            setPort(tlsPort)
+            setAttribute("v", "2")
+            setAttribute("id", id)
+            setAttribute("tls", tlsPort.toString())
+            udpPort?.let { setAttribute("udp", it.toString()) }
         }
         val l = object : NsdManager.RegistrationListener {
-            override fun onServiceRegistered(info: NsdServiceInfo) = AppLog.i("mDNS: advertising ${info.serviceName} on port $sipPort")
+            override fun onServiceRegistered(info: NsdServiceInfo) = AppLog.i("mDNS: advertising ${info.serviceName} (TLS $tlsPort)")
             override fun onRegistrationFailed(info: NsdServiceInfo, code: Int) = AppLog.w("mDNS: advertise failed ($code)")
             override fun onServiceUnregistered(info: NsdServiceInfo) = AppLog.i("mDNS: advertisement stopped")
             override fun onUnregistrationFailed(info: NsdServiceInfo, code: Int) = Unit

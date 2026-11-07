@@ -43,12 +43,14 @@ class SecureLinkTest {
         return KeyStore.getInstance("PKCS12").apply { f.inputStream().use { load(it, "changeit".toCharArray()) } }
     }
 
-    private fun gateway(ks: KeyStore, received: MutableList<Pair<String, String>>, legOut: AtomicReference<CallLeg>): SipUserAgent {
+    private fun gateway(ks: KeyStore, received: MutableList<Pair<String, String>>, legOut: AtomicReference<CallLeg>,
+                        codecs: List<io.github.sparkcyf.voicesipagent.sip.media.AudioCodec> = listOf(
+                            io.github.sparkcyf.voicesipagent.sip.media.AudioCodec.PCMU)): SipUserAgent {
         val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply { init(ks, "changeit".toCharArray()) }
         val gw = SipUserAgent(SipConfig(
             SipAccount(server = "", username = "gateway", password = ""), localPort = 0, serverMode = true,
             registrarPassword = "s3cret", tls = TlsSettings(TlsPinning.serverContext(kmf.keyManagers), 0),
-            udpEnabled = false, srtp = SrtpMode.REQUIRED), log)
+            udpEnabled = false, srtp = SrtpMode.REQUIRED, codecs = codecs), log)
         gw.setIncomingCallHandler { leg -> legOut.set(leg); leg.answer() }
         gw.outgoingMessageHandler = { to, text -> received += to to text; true }
         gw.start()
@@ -56,9 +58,12 @@ class SecureLinkTest {
         return gw
     }
 
-    private fun phone(port: Int, pin: String, password: String = "s3cret"): SipUserAgent = SipUserAgent(SipConfig(
+    private fun phone(port: Int, pin: String, password: String = "s3cret",
+                      codecs: List<io.github.sparkcyf.voicesipagent.sip.media.AudioCodec> = listOf(
+                          io.github.sparkcyf.voicesipagent.sip.media.AudioCodec.PCMU)): SipUserAgent = SipUserAgent(SipConfig(
         SipAccount("127.0.0.1", port, "phone", password, domain = "127.0.0.1"), localPort = 0,
-        tls = TlsSettings(TlsPinning.clientContext(pin), 0), srtp = SrtpMode.REQUIRED, registerExpiresSec = 120), log)
+        tls = TlsSettings(TlsPinning.clientContext(pin), 0), srtp = SrtpMode.REQUIRED, registerExpiresSec = 120,
+        codecs = codecs), log)
 
     private fun awaitReady(ua: SipUserAgent, ms: Long): Boolean {
         val l = CountDownLatch(1)
@@ -180,6 +185,40 @@ class SecureLinkTest {
             } finally {
                 ph.stop(300); gw.stop(300)
             }
+        }
+    }
+
+    @Test
+    fun hdVoiceNegotiatesL16At16kAndCarriesAudio() {
+        val ks = gatewayKey() ?: return
+        val pin = TlsPinning.fingerprint(ks.getCertificate("gw") as X509Certificate)
+        val hd = listOf(io.github.sparkcyf.voicesipagent.sip.media.AudioCodec.L16_16K,
+            io.github.sparkcyf.voicesipagent.sip.media.AudioCodec.PCMU)
+        val gwLeg = AtomicReference<CallLeg>()
+        val gw = gateway(ks, CopyOnWriteArrayList(), gwLeg, hd)
+        val ph = phone(gw.tlsPort!!, pin, codecs = hd)
+        try {
+            ph.start()
+            assertTrue(awaitReady(ph, 5000))
+            val leg = ph.dial("4441444", Party(null))
+            repeat(150) { if (leg.state != LegState.CONNECTED || gwLeg.get()?.state != LegState.CONNECTED) Thread.sleep(20) }
+            val pm = leg.media!!; val gm = gwLeg.get().media!!
+            assertEquals(16000, pm.format.sampleRate)
+            assertEquals(16000, gm.format.sampleRate)
+            assertEquals(16000, gw.activeCallRate())
+            var peak = 0
+            for (i in 0 until 60) {
+                val f = ShortArray(320) { k -> (9000 * sin(2 * PI * 3000 * (i * 320 + k) / 16000.0)).toInt().toShort() }
+                pm.writeFrame(f); gm.writeFrame(ShortArray(320))
+                Thread.sleep(20)
+                val r = gm.readFrame(); assertEquals(320, r.size)
+                for (s in r) peak = maxOf(peak, abs(s.toInt()))
+            }
+            // A 3 kHz tone can't survive 8 kHz G.711 band-limiting this cleanly; L16 carries it exactly.
+            assertTrue("3 kHz tone over HD voice (peak=$peak)", peak > 8000)
+            leg.hangup()
+        } finally {
+            ph.stop(500); gw.stop(500)
         }
     }
 }

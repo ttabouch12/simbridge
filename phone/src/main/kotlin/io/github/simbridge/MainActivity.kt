@@ -34,6 +34,7 @@ sealed interface Screen {
 
 class MainActivity : ComponentActivity() {
     private val screen = mutableStateOf<Screen>(Screen.List)
+    private val pendingPair = mutableStateOf<PairedGateway?>(null)
 
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         LinkApp.core(this).contacts.clearCache()
@@ -55,6 +56,7 @@ class MainActivity : ComponentActivity() {
                     BackHandler(enabled = s != Screen.List) {
                         screen.value = Screen.List
                     }
+                    io.github.simbridge.ui.ConfirmPairing(core, pendingPair.value) { pendingPair.value = null }
                     AnimatedContent(s, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "nav") { cur ->
                         when (cur) {
                             Screen.List -> ConversationsScreen(core,
@@ -84,6 +86,10 @@ class MainActivity : ComponentActivity() {
 
     private fun handle(intent: Intent?) {
         intent ?: return
+        if (intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "simbridge") {
+            pendingPair.value = PairedGateway.parse(intent.data.toString())
+            return
+        }
         intent.getStringExtra(EXTRA_KEY)?.let { key ->
             val address = LinkApp.core(this).store.thread(key).lastOrNull()?.address ?: return@let
             screen.value = Screen.Chat(key, address)

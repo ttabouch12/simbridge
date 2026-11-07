@@ -60,6 +60,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.simbridge.LinkCore
+import io.github.simbridge.PairedGateway
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
 import io.github.simbridge.LinkService
 import io.github.simbridge.LinkState
 import io.github.simbridge.SystemSms
@@ -72,8 +76,10 @@ import kotlinx.coroutines.delay
 fun SettingsScreen(core: LinkCore, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val status by core.status.collectAsState()
-    var pw by remember { mutableStateOf(core.prefs.password) }
-    var show by remember { mutableStateOf(false) }
+    var pasting by remember { mutableStateOf(false) }
+    var link by remember { mutableStateOf("") }
+    var pending by remember { mutableStateOf<PairedGateway?>(null) }
+    var confirmUnpair by remember { mutableStateOf(false) }
     var tick by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) { while (true) { delay(1500); tick++ } }   // refresh account / battery state after returning
     val accountOn = remember(tick) { Telecom.isEnabled(ctx) }
@@ -146,23 +152,66 @@ fun SettingsScreen(core: LinkCore, onBack: () -> Unit) {
                     Switch(mirrorOn, { mirrorOn = it; core.prefs.mirrorToSystem = it })
                 }
             }
-            Card(Icons.Filled.Key, "Gateway password",
-                "The password set in the SimBridge Gateway app. Your SIM phone refuses phones without it.", ok = core.prefs.password.isNotBlank()) {
-                OutlinedTextField(
-                    value = pw, onValueChange = { pw = it.trim() }, singleLine = true, label = { Text("Password") },
-                    visualTransformation = if (show) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    trailingIcon = { IconButton({ show = !show }) { Icon(if (show) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, null) } },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.size(8.dp))
-                Button({ core.setPassword(pw) }, enabled = pw != core.prefs.password && pw.isNotBlank()) { Text("Save") }
+            val paired = remember(tick) { core.prefs.paired }
+            Card(Icons.Filled.QrCodeScanner, "Pair with SIM phone",
+                if (paired != null) "Paired. Calls and texts are encrypted (TLS + SRTP) and only go to the SIM phone with key ${paired.fingerprint.take(8)}…"
+                else "On the SIM phone open SimBridge Gateway → Security → Pair a phone, then scan the code.",
+                ok = paired != null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button({ scanPairingCode(ctx) { pending = it } }) { Text(if (paired == null) "Scan code" else "Scan again") }
+                    TextButton({ pasting = !pasting }) { Text("Paste link") }
+                    if (paired != null) TextButton({ confirmUnpair = true }) { Text("Unpair") }
+                }
+                if (pasting) {
+                    OutlinedTextField(link, { link = it.trim() }, singleLine = true, label = { Text("simbridge://pair?…") },
+                        modifier = Modifier.fillMaxWidth())
+                    Button({ pending = PairedGateway.parse(link) ?: run {
+                        android.widget.Toast.makeText(ctx, "That isn't a SimBridge pairing link", android.widget.Toast.LENGTH_SHORT).show(); null
+                    } }, enabled = link.isNotEmpty()) { Text("Pair") }
+                }
             }
             Text("The SIM phone is found automatically on your home Wi-Fi and on its own hotspot. No addresses to enter.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp))
         }
     }
+    ConfirmPairing(core, pending) { pending = null; pasting = false; link = ""; tick++ }
+    if (confirmUnpair) AlertDialog(
+        onDismissRequest = { confirmUnpair = false },
+        title = { Text("Unpair?") },
+        text = { Text("Calls and texts stop until you scan a SIM phone's code again.") },
+        confirmButton = { TextButton({ core.unpair(); confirmUnpair = false; tick++ }) { Text("Unpair") } },
+        dismissButton = { TextButton({ confirmUnpair = false }) { Text("Cancel") } },
+    )
+}
+
+@Composable
+fun ConfirmPairing(core: LinkCore, g: PairedGateway?, onDone: () -> Unit) {
+    if (g == null) return
+    AlertDialog(
+        onDismissRequest = onDone,
+        icon = { Icon(Icons.Filled.QrCodeScanner, null) },
+        title = { Text("Pair with this SIM phone?") },
+        text = { Text("Gateway ${g.id.take(6)}, key ${g.fingerprint.take(8)}…\n\nYour calls and texts will go through this phone's SIM. " +
+            "Only continue if you just scanned the code on your own SIM phone.") },
+        confirmButton = { TextButton({ core.pair(g); onDone() }) { Text("Pair") } },
+        dismissButton = { TextButton(onDone) { Text("Cancel") } },
+    )
+}
+
+/** Scans the QR with Google's code scanner (no camera permission; runs in Play services). */
+fun scanPairingCode(ctx: android.content.Context, onResult: (PairedGateway) -> Unit) {
+    val opts = com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions.Builder()
+        .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE).build()
+    com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(ctx, opts).startScan()
+        .addOnSuccessListener { b ->
+            val g = b.rawValue?.let(PairedGateway::parse)
+            if (g != null) onResult(g)
+            else android.widget.Toast.makeText(ctx, "That isn't a SimBridge pairing code", android.widget.Toast.LENGTH_SHORT).show()
+        }
+        .addOnFailureListener {
+            android.widget.Toast.makeText(ctx, "Scanner unavailable: use Paste link", android.widget.Toast.LENGTH_LONG).show()
+        }
 }
 
 @Composable

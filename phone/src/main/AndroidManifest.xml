@@ -45,6 +45,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Pairing link from the SIM phone's QR code (opened by the Camera app or a paste). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="simbridge" android:host="pair" />
+            </intent-filter>
             <!-- Compose: required for the default SMS app role, and opened by "Message" buttons. -->
             <intent-filter>
                 <action android:name="android.intent.action.SENDTO" />

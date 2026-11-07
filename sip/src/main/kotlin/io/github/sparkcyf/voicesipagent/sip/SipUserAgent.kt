@@ -51,7 +51,10 @@ class SipUserAgent(
 
     private val clientTxs = HashMap<String, ClientTransaction>()
     private val serverTxs = HashMap<String, ServerTransaction>()
-    internal val calls = HashMap<String, SipCall>()
+    internal val calls = java.util.concurrent.ConcurrentHashMap<String, SipCall>()
+
+    /** PCM rate of the current call (16000 for HD voice), or null when idle. Any thread. */
+    fun activeCallRate(): Int? = calls.values.firstNotNullOfOrNull { it.negotiatedRate }
 
     private val statusListeners = CopyOnWriteArrayList<EndpointStatusListener>()
     @Volatile private var incomingHandler: IncomingCallHandler? = null

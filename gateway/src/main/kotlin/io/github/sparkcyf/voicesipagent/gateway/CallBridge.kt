@@ -185,12 +185,17 @@ class CallBridge(
                 }, config.mediaSetupTimeoutMs, TimeUnit.MILLISECONDS)
             }
             val ma = a.media
-            val mb = b.media
+            var mb = b.media
             if (s.media == null && ma != null && mb != null) {
                 if (ma.format != mb.format) {
-                    log("$s: incompatible media formats ${ma.format} / ${mb.format}")
-                    endSession(s, HangupCause.INTERNAL_ERROR)
-                    return
+                    val adapted = runCatching { ResamplingPort(mb, ma.format) }.getOrNull()
+                    if (adapted == null) {
+                        log("$s: incompatible media formats ${ma.format} / ${mb.format}")
+                        endSession(s, HangupCause.INTERNAL_ERROR)
+                        return
+                    }
+                    log("$s: resampling ${mb.format.sampleRate} -> ${ma.format.sampleRate} Hz")
+                    mb = adapted
                 }
                 s.media = MediaBridge(ma, mb).also { it.start() }
                 s.mediaTimer?.cancel(false)
