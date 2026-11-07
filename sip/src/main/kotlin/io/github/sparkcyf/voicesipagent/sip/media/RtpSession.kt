@@ -17,6 +17,9 @@ data class RtpParams(
     val payloadType: Int,
     val telephoneEventPt: Int?,
     val sendEnabled: Boolean,
+    /** SRTP contexts (null = plain RTP). Kept per call, so re-INVITEs don't reset their state. */
+    val srtpTx: SrtpContext? = null,
+    val srtpRx: SrtpContext? = null,
 )
 
 /**
@@ -33,7 +36,7 @@ class RtpSession(
     private var seq = SecureRandom().nextInt(0xffff)
     private var ts = SecureRandom().nextInt().toLong() and 0xffffffffL
     private val jitter = JitterBuffer()
-    private val sendBuf = ByteArray(12 + 1024)
+    private val sendBuf = ByteArray(12 + 1024 + SrtpContext.TAG_LEN)
     private val dtmfQueue = ConcurrentLinkedQueue<Pair<Char, Int>>()
     private var dtmfTx: DtmfTx? = null
     private var dtmfGapFrames = 0
@@ -49,6 +52,9 @@ class RtpSession(
     @Volatile var packetsReceived = 0L
         private set
     @Volatile var lastReceiveAtMs = 0L
+        private set
+    /** SRTP packets dropped because their authentication tag didn't verify. */
+    @Volatile var authFailures = 0L
         private set
 
     val localPort: Int get() = socket.localPort
@@ -122,8 +128,10 @@ class RtpSession(
 
     private fun send(len: Int, p: RtpParams) {
         if (!p.sendEnabled) return
+        val out = p.srtpTx?.protect(sendBuf, len) ?: len
+        if (out < 0) return
         try {
-            socket.send(DatagramPacket(sendBuf, len, p.remote))
+            socket.send(DatagramPacket(sendBuf, out, p.remote))
             packetsSent++
         } catch (_: Exception) {
             // Transient network errors must not kill the clock thread; RTP timeout handles real loss.
@@ -143,9 +151,13 @@ class RtpSession(
                 continue
             }
             val p = params
-            val len = pkt.length
+            var len = pkt.length
             if (len < 12 || (buf[0].toInt() and 0xc0) != 0x80) continue
             if (pkt.address != p.remote.address && !isSameHostFallback(pkt.address, p.remote.address)) continue
+            if (p.srtpRx != null) {
+                len = p.srtpRx.unprotect(buf, len)
+                if (len < 0) { authFailures++; continue }   // forged, replayed or corrupted
+            }
             val cc = buf[0].toInt() and 0x0f
             val hasExt = (buf[0].toInt() and 0x10) != 0
             val hasPad = (buf[0].toInt() and 0x20) != 0

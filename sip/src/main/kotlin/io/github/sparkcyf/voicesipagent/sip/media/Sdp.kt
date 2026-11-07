@@ -7,6 +7,10 @@ data class SdpAudio(
     val payloadTypes: List<Int>,
     val rtpmap: Map<Int, String>,
     val direction: String,
+    /** First `a=crypto` line we support (suite AES_CM_128_HMAC_SHA1_80): tag and inline key. */
+    val crypto: SdpCrypto? = null,
+    /** True if the m-line asked for RTP/SAVP (SRTP). */
+    val secure: Boolean = false,
 ) {
     /** First payload type in the peer's preference order that we can decode. */
     fun firstSupportedCodec(): AudioCodec? {
@@ -29,6 +33,8 @@ data class SdpAudio(
     val isOnHold: Boolean get() = address == "0.0.0.0" || direction == "sendonly" || direction == "inactive"
 }
 
+data class SdpCrypto(val tag: Int, val inlineKey: String)
+
 object Sdp {
     const val DEFAULT_TE_PT = 101
 
@@ -40,6 +46,10 @@ object Sdp {
         codecs: List<Pair<Int, AudioCodec>>,
         telephoneEventPt: Int?,
         direction: String = "sendrecv",
+        /** When set, offer/answer SRTP (RTP/SAVP) with this key. */
+        crypto: SdpCrypto? = null,
+        /** With [crypto]: true = RTP/SAVP (SRTP required), false = RTP/AVP + a=crypto (best effort). */
+        savp: Boolean = true,
     ): String {
         val pts = codecs.map { it.first } + listOfNotNull(telephoneEventPt)
         val sb = StringBuilder()
@@ -48,12 +58,13 @@ object Sdp {
         sb.append("s=voice-sip-agent\r\n")
         sb.append("c=IN IP4 $localIp\r\n")
         sb.append("t=0 0\r\n")
-        sb.append("m=audio $rtpPort RTP/AVP ${pts.joinToString(" ")}\r\n")
+        sb.append("m=audio $rtpPort ${if (crypto != null && savp) "RTP/SAVP" else "RTP/AVP"} ${pts.joinToString(" ")}\r\n")
         for ((pt, codec) in codecs) sb.append("a=rtpmap:$pt ${codec.encodingName}/8000\r\n")
         if (telephoneEventPt != null) {
             sb.append("a=rtpmap:$telephoneEventPt telephone-event/8000\r\n")
             sb.append("a=fmtp:$telephoneEventPt 0-16\r\n")
         }
+        if (crypto != null) sb.append("a=crypto:${crypto.tag} ${SrtpContext.SUITE} inline:${crypto.inlineKey}\r\n")
         sb.append("a=ptime:20\r\n")
         sb.append("a=$direction\r\n")
         return sb.toString()
@@ -66,6 +77,8 @@ object Sdp {
         var pts = emptyList<Int>()
         val rtpmap = HashMap<Int, String>()
         var direction = "sendrecv"
+        var crypto: SdpCrypto? = null
+        var secure = false
         var inAudio = false
         var seenAudio = false
         for (raw in text.split('\n')) {
@@ -81,6 +94,7 @@ object Sdp {
                         seenAudio = true
                         port = parts[1].substringBefore('/').toInt()
                         pts = parts.drop(3).mapNotNull { it.toIntOrNull() }
+                        secure = parts[2].uppercase().contains("SAVP")
                     }
                 }
                 'c' -> {
@@ -95,13 +109,20 @@ object Sdp {
                             if (pt != null) rtpmap[pt] = v.substringAfter(' ').trim()
                         }
                         v == "sendrecv" || v == "sendonly" || v == "recvonly" || v == "inactive" -> direction = v
+                        v.startsWith("crypto:") && crypto == null -> {
+                            val f = v.substring(7).split(' ')
+                            val inline = f.getOrNull(2)
+                            if (f.size >= 3 && f[1].equals(SrtpContext.SUITE, true) && inline != null && inline.startsWith("inline:")) {
+                                f[0].toIntOrNull()?.let { crypto = SdpCrypto(it, inline.removePrefix("inline:")) }
+                            }
+                        }
                     }
                 }
             }
         }
         if (!seenAudio) return null
         val addr = mediaConn ?: sessionConn ?: return null
-        return SdpAudio(addr, port, pts, rtpmap, if (port == 0) "inactive" else direction)
+        return SdpAudio(addr, port, pts, rtpmap, if (port == 0) "inactive" else direction, crypto, secure)
     }
 
     /** Direction to answer with, mirroring the offer. */

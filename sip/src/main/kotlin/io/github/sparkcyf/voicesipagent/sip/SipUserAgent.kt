@@ -40,9 +40,14 @@ class SipUserAgent(
     private val random = SecureRandom()
     internal lateinit var transport: SipTransport
     private lateinit var serverAddr: InetSocketAddress
+    private val isTlsClient get() = !config.serverMode && config.tls != null
     internal var localIp: String = "0.0.0.0"
         private set
     internal val localPort: Int get() = transport.localPort
+    /** Server mode: actual TLS listening port (useful when [TlsSettings.port] is 0). */
+    val tlsPort: Int? get() = (if (::transport.isInitialized) transport as? ServerTransport else null)?.tlsPort
+    /** Server mode: actual UDP listening port, if UDP is enabled. */
+    val udpPort: Int? get() = (if (::transport.isInitialized) transport as? ServerTransport else null)?.udpPort
 
     private val clientTxs = HashMap<String, ClientTransaction>()
     private val serverTxs = HashMap<String, ServerTransaction>()
@@ -93,7 +98,27 @@ class SipUserAgent(
         if (started) return@post
         started = true
         stopping = false
-        transport = SipTransport(config.localPort, log) { msg, from -> post { onMessage(msg, from) } }
+        val handler: (SipMessage, InetSocketAddress) -> Unit = { msg, from -> post { onMessage(msg, from) } }
+        if (config.serverMode) {
+            val udp = if (config.udpEnabled || config.tls == null) UdpSipTransport(config.localPort, log, config.sourceFilter, handler) else null
+            val tls = config.tls?.let { TlsServerTransport(it.port, it.sslContext, log, config.sourceFilter, handler) }
+            transport = ServerTransport(udp, tls)
+            executor.scheduleWithFixedDelay({ (transport as? ServerTransport)?.reapIdle(15 * 60_000L) }, 60, 60, TimeUnit.SECONDS)
+        } else if (config.tls != null) {
+            resolve()
+            transport = TlsClientTransport(serverAddr, config.tls.sslContext, log, handler) {
+                post {
+                    if (stopping || !started) return@post
+                    setStatus(false, "connection lost")
+                    regRefresh?.cancel(false)
+                    regRefresh = schedule(2000) { register() }
+                }
+            }
+            val ka = config.keepAliveSec.toLong().coerceAtLeast(15)
+            executor.scheduleWithFixedDelay({ (transport as? TlsClientTransport)?.keepAlive(20_000) }, ka, ka, TimeUnit.SECONDS)
+        } else {
+            transport = UdpSipTransport(config.localPort, log, null, handler)
+        }
         transport.start()
         if (config.serverMode) {
             resolveLocal()
@@ -101,7 +126,8 @@ class SipUserAgent(
             setStatus(false, "waiting for phone to register")
         } else {
             resolve()
-            log.info("started on $localIp:$localPort -> ${account.server}:${account.port}")
+            (transport as? TlsClientTransport)?.localAddress?.hostAddress?.let { localIp = it }
+            log.info("started on $localIp:$localPort -> ${account.server}:${account.port}${if (isTlsClient) " (TLS)" else ""}")
             register()
         }
         executor.scheduleWithFixedDelay({ checkMedia() }, 5, 5, TimeUnit.SECONDS)
@@ -304,13 +330,23 @@ class SipUserAgent(
             return
         }
         if (config.serverMode && (req.method == "INVITE" || req.method == "MESSAGE") && req.to?.tag == null &&
-            calls[req.callId] == null && !fromRegisteredPhone(from) && config.registrarPassword.isNotEmpty()) {
-            // Not registered here (we may have just restarted): challenge it like a REGISTER. The
-            // phone retries with credentials; a valid answer re-learns it as the registered phone.
+            calls[req.callId] == null && config.registrarPassword.isNotEmpty() &&
+            (config.authEveryRequest || !fromRegisteredPhone(from))) {
+            // Every new call or text must carry fresh credentials (single-use nonce), so a spoofed
+            // source address alone can't use the SIM. A valid answer also re-learns the phone
+            // (e.g. right after we restarted, before its next REGISTER).
             if (!requestAuthPassed(req, from, req.method)) return
-            val user = req.headers["Contact"]?.let { NameAddr.parse(it) }?.let { SipUri.parse(it.uri)?.user }
-                ?: req.from?.sipUri?.user ?: "phone"
-            learnPeer(req.from?.sipUri?.user, user, from, config.registrarLeaseSec.coerceIn(30, 86_400))
+            if (!fromRegisteredPhone(from) || serverAddr != from) {
+                val user = req.headers["Contact"]?.let { NameAddr.parse(it) }?.let { SipUri.parse(it.uri)?.user }
+                    ?: req.from?.sipUri?.user ?: "phone"
+                learnPeer(req.from?.sipUri?.user, user, from, config.registrarLeaseSec.coerceIn(30, 86_400))
+            }
+        }
+        if (config.serverMode && req.to?.tag != null && calls[req.callId] != null && !fromRegisteredPhone(from)) {
+            // In-dialog requests (BYE, re-INVITE, INFO) only from the phone that owns the call.
+            log.warn("${req.method} for a call from foreign ${from.address?.hostAddress} rejected")
+            transport.send(buildResponse(req, 403), from)
+            return
         }
         val tx = ServerTransaction(this, req, from)
         serverTxs[tx.key] = tx
@@ -455,7 +491,7 @@ class SipUserAgent(
         val now = System.currentTimeMillis()
         authBanUntil[ip]?.let { until ->
             if (now < until) {
-                log.warn("REGISTER from banned $ip dropped (${(until - now) / 1000}s left)")
+                log.warn("${req.method} from banned $ip dropped (${(until - now) / 1000}s left)")
                 return false
             }
             authBanUntil.remove(ip); authFailTimes.remove(ip)
@@ -468,12 +504,13 @@ class SipUserAgent(
         }
         if (ok) {
             authFailTimes.remove(ip); authBanUntil.remove(ip)
+            cred?.nonce?.let { issuedNonces.remove(it) }   // single use: a captured request can't be replayed
             return true
         }
         // A credential-bearing REGISTER that failed counts toward the ban; a first, challenge-less
         // REGISTER does not (that is the normal start of the handshake).
         if (authHeader != null && registrarAuthFailed(ip, now)) {
-            log.warn("REGISTER brute-force from $ip: banned for ${authBanMs / 1000}s")
+            log.warn("${req.method} brute-force from $ip: banned for ${authBanMs / 1000}s")
             return false
         }
         val nonce = issueNonce(now)
@@ -602,7 +639,11 @@ class SipUserAgent(
         calls[call.callId] = call
     }
 
-    internal fun contactUri(): String = "sip:$localUser@$localIp:$localPort"
+    internal fun contactUri(): String =
+        "sip:$localUser@$localIp:$localPort" + if (viaProto() == "TLS") ";transport=tls" else ""
+
+    private fun viaProto(): String =
+        if (::serverAddr.isInitialized) transport.protoFor(serverAddr) else if (isTlsClient) "TLS" else "UDP"
 
     internal fun newRequest(
         method: String,
@@ -615,7 +656,7 @@ class SipUserAgent(
         branch: String = newBranch(),
     ): SipRequest {
         val h = SipHeaders()
-        h.add("Via", "SIP/2.0/UDP $localIp:$localPort;branch=$branch;rport")
+        h.add("Via", "SIP/2.0/${viaProto()} $localIp:$localPort;branch=$branch;rport")
         routes.forEach { h.add("Route", it) }
         h.add("Max-Forwards", "70")
         h.add("From", from.toString())

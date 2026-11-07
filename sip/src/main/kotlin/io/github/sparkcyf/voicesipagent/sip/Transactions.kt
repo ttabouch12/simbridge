@@ -28,7 +28,7 @@ internal class ClientTransaction(
 
     fun start() {
         ua.transport.send(request, dest)
-        scheduleRetransmit()
+        if (!ua.transport.reliableFor(dest)) scheduleRetransmit()   // RFC 3261 §17.1: no retransmits on TCP/TLS
         timeoutTask = ua.schedule(TX_TIMEOUT) {
             if (!completed) {
                 completed = true
@@ -110,7 +110,13 @@ internal class ServerTransaction(
         lastResponse = r
         ua.transport.send(r, source)
         if (r.code < 200) return
-        if (isInvite) {
+        if (isInvite && ua.transport.reliableFor(source)) {
+            // Reliable transport: no 2xx retransmission, but still give up if never ACKed.
+            ua.schedule(TX_TIMEOUT) {
+                if (!acked) onAckTimeout?.invoke()
+                ua.removeServerTx(this)
+            }
+        } else if (isInvite) {
             var interval = T1
             fun again() {
                 retransmitTask = ua.schedule(interval) {

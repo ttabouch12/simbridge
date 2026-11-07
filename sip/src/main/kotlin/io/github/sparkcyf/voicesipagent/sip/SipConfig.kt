@@ -1,6 +1,8 @@
 package io.github.sparkcyf.voicesipagent.sip
 
 import io.github.sparkcyf.voicesipagent.sip.media.AudioCodec
+import java.net.InetAddress
+import javax.net.ssl.SSLContext
 
 data class SipAccount(
     /** Registrar / proxy host (IP or name). */
@@ -52,7 +54,27 @@ data class SipConfig(
     val registrarPassword: String = "",
     /** Server mode: realm advertised in the auth challenge. */
     val registrarRealm: String = "voice-sip-agent",
+    /** SRTP for call audio. REQUIRED refuses calls whose peer doesn't offer/accept SRTP. */
+    val srtp: SrtpMode = SrtpMode.OFF,
+    /**
+     * SIP over TLS. Server mode: listen on [TlsSettings.port] with the context's key.
+     * Client mode: connect to `account.server:account.port` over TLS (the context pins the server).
+     */
+    val tls: TlsSettings? = null,
+    /** Server mode: also listen for plain SIP/UDP on [localPort] (other SIP apps). */
+    val udpEnabled: Boolean = true,
+    /** Server mode: drop packets/connections from sources this rejects (e.g. mobile data). */
+    val sourceFilter: ((InetAddress) -> Boolean)? = null,
+    /** Server mode: require digest credentials on every out-of-dialog INVITE and MESSAGE too. */
+    val authEveryRequest: Boolean = true,
+    /** Client TLS: keep-alive ping interval (RFC 5626 CRLF). */
+    val keepAliveSec: Int = 120,
 )
+
+data class TlsSettings(val sslContext: SSLContext, val port: Int)
+
+/** SRTP policy for calls (RFC 3711 + SDES keys in SDP; only safe over an encrypted signalling transport). */
+enum class SrtpMode { OFF, OPTIONAL, REQUIRED }
 
 /** Minimal logging hook so the stack stays free of platform dependencies. */
 interface SipLog {

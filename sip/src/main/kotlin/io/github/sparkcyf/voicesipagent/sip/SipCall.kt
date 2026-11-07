@@ -4,6 +4,8 @@ import io.github.sparkcyf.voicesipagent.sip.media.RtpParams
 import io.github.sparkcyf.voicesipagent.sip.media.RtpSession
 import io.github.sparkcyf.voicesipagent.sip.media.Sdp
 import io.github.sparkcyf.voicesipagent.sip.media.SdpAudio
+import io.github.sparkcyf.voicesipagent.sip.media.SdpCrypto
+import io.github.sparkcyf.voicesipagent.sip.media.SrtpContext
 import io.github.sparkcyf.voicesipagent.voice.AbstractCallLeg
 import io.github.sparkcyf.voicesipagent.voice.HangupCause
 import io.github.sparkcyf.voicesipagent.voice.LegDirection
@@ -57,6 +59,32 @@ internal class SipCall(
     private var rtp: RtpSession? = null
     private var rtpParams: RtpParams? = null
     private val sdpSessionId = ua.newSdpSessionId()
+
+    // SRTP: our key encrypts what we send; the peer's key (from its SDP) decrypts what we receive.
+    private val localKey: String? = if (config.srtp != SrtpMode.OFF) SrtpContext.newInlineKey() else null
+    private val srtpTx: SrtpContext? = localKey?.let(SrtpContext::fromInline)
+    private var srtpRx: SrtpContext? = null
+    private var srtpRxKey: String? = null
+
+    /** True if this SDP lets us run SRTP with the peer. */
+    private fun canSrtp(sdp: SdpAudio): Boolean =
+        localKey != null && sdp.crypto != null && SrtpContext.fromInline(sdp.crypto.inlineKey) != null
+
+    /** False if policy requires SRTP and the peer's SDP doesn't provide it. */
+    private fun srtpAcceptable(sdp: SdpAudio): Boolean = config.srtp != SrtpMode.REQUIRED || canSrtp(sdp)
+
+    private fun rxContext(sdp: SdpAudio): SrtpContext? {
+        val key = sdp.crypto?.inlineKey ?: return null
+        if (key != srtpRxKey) { srtpRx = SrtpContext.fromInline(key); srtpRxKey = key }
+        return srtpRx
+    }
+
+    /** Our a=crypto line for an answer to [remote] (same tag), or for an offer when [remote] is null. */
+    private fun cryptoFor(remote: SdpAudio?): SdpCrypto? {
+        val key = localKey ?: return null
+        if (remote == null) return SdpCrypto(1, key)
+        return remote.crypto?.takeIf { canSrtp(remote) }?.let { SdpCrypto(it.tag, key) }
+    }
     private var sdpVersion = 0L
     private var finished = false
 
@@ -125,7 +153,8 @@ internal class SipCall(
         }
         auth?.let { req.headers.add(it.first, it.second) }
         req.headers.add("Content-Type", "application/sdp")
-        req.body = localSdp(config.codecs.map { it.payloadType to it }, Sdp.DEFAULT_TE_PT, "sendrecv").toByteArray()
+        req.body = localSdp(config.codecs.map { it.payloadType to it }, Sdp.DEFAULT_TE_PT, "sendrecv",
+            cryptoFor(null), savp = config.srtp == SrtpMode.REQUIRED).toByteArray()
         req.headers.remove("Accept")
         inviteReq = req
         inviteTx = ua.sendClient(req) { r -> onInviteResponse(req, r) }
@@ -156,8 +185,8 @@ internal class SipCall(
             }
             val answer = Sdp.parse(r.bodyText)
             val codec = answer?.firstSupportedCodec()
-            if (answer == null || codec == null) {
-                log.warn("call $id: unusable SDP answer")
+            if (answer == null || codec == null || !srtpAcceptable(answer)) {
+                log.warn("call $id: unusable SDP answer${if (answer != null && codec != null) " (no SRTP)" else ""}")
                 sendBye()
                 end(HangupCause.INTERNAL_ERROR)
                 return
@@ -222,8 +251,8 @@ internal class SipCall(
         routeSet = req.headers.getAll("Record-Route")
         tx.respond(ua.buildResponse(req, 100))
         val sdp = if (req.contentType == "application/sdp") Sdp.parse(req.bodyText) else null
-        if (sdp == null || sdp.firstSupportedCodec() == null) {
-            log.warn("call $id: no acceptable SDP offer")
+        if (sdp == null || sdp.firstSupportedCodec() == null || !srtpAcceptable(sdp)) {
+            log.warn("call $id: no acceptable SDP offer${if (sdp != null && sdp.firstSupportedCodec() != null) " (SRTP required)" else ""}")
             tx.respond(ua.buildResponse(req, 488, localTag))
             return false
         }
@@ -248,7 +277,8 @@ internal class SipCall(
         resp.headers.add("Contact", "<${ua.contactUri()}>")
         ua.addCapabilities(resp)
         resp.headers.add("Content-Type", "application/sdp")
-        resp.body = localSdp(listOf(sdp.payloadFor(codec) to codec), sdp.telephoneEventPt, Sdp.answerDirection(sdp.direction)).toByteArray()
+        resp.body = localSdp(listOf(sdp.payloadFor(codec) to codec), sdp.telephoneEventPt, Sdp.answerDirection(sdp.direction),
+            cryptoFor(sdp), sdp.secure).toByteArray()
         tx.onAckTimeout = {
             if (state == LegState.CONNECTED) {
                 log.warn("call $id: 200 OK never ACKed")
@@ -314,17 +344,19 @@ internal class SipCall(
         val cur = rtpParams
         if (sdp != null) {
             val codec = sdp.firstSupportedCodec()
-            if (codec == null) {
+            if (codec == null || !srtpAcceptable(sdp)) {
                 tx.respond(ua.buildResponse(req, 488))
                 return
             }
             applyRemoteSdp(sdp)
             resp.headers.add("Content-Type", "application/sdp")
-            resp.body = localSdp(listOf(sdp.payloadFor(codec) to codec), sdp.telephoneEventPt, Sdp.answerDirection(sdp.direction)).toByteArray()
+            resp.body = localSdp(listOf(sdp.payloadFor(codec) to codec), sdp.telephoneEventPt, Sdp.answerDirection(sdp.direction),
+                cryptoFor(sdp), sdp.secure).toByteArray()
         } else if (cur != null && isInvite) {
             // Offerless re-INVITE: we offer what we have; the answer arrives in the ACK.
             resp.headers.add("Content-Type", "application/sdp")
-            resp.body = localSdp(listOf(cur.payloadType to cur.codec), cur.telephoneEventPt, "sendrecv").toByteArray()
+            resp.body = localSdp(listOf(cur.payloadType to cur.codec), cur.telephoneEventPt, "sendrecv",
+                if (cur.srtpTx != null) cryptoFor(null) else null, config.srtp == SrtpMode.REQUIRED).toByteArray()
         }
         if (isInvite) awaitingAck = tx
         tx.respond(resp)
@@ -332,6 +364,7 @@ internal class SipCall(
 
     private fun applyRemoteSdp(sdp: SdpAudio) {
         val codec = sdp.firstSupportedCodec() ?: return
+        if (!srtpAcceptable(sdp)) { log.warn("call $id: ignoring SDP without SRTP"); return }
         val p = paramsFor(sdp, codec)
         if (p != rtpParams) log.info("call $id media update: ${codec.name} hold=${sdp.isOnHold}")
         startMedia(p)
@@ -410,6 +443,8 @@ internal class SipCall(
         payloadType = sdp.payloadFor(codec),
         telephoneEventPt = sdp.telephoneEventPt,
         sendEnabled = !sdp.isOnHold && sdp.port != 0,
+        srtpTx = if (canSrtp(sdp)) srtpTx else null,
+        srtpRx = if (canSrtp(sdp)) rxContext(sdp) else null,
     )
 
     private fun startMedia(p: RtpParams) {
@@ -428,8 +463,10 @@ internal class SipCall(
         rtp = null
     }
 
-    private fun localSdp(codecs: List<Pair<Int, io.github.sparkcyf.voicesipagent.sip.media.AudioCodec>>, tePt: Int?, direction: String): String =
-        Sdp.build(sdpSessionId, sdpVersion++, ua.localIp, rtpSocket?.localPort ?: 0, codecs, tePt, direction)
+    private fun localSdp(
+        codecs: List<Pair<Int, io.github.sparkcyf.voicesipagent.sip.media.AudioCodec>>, tePt: Int?, direction: String,
+        crypto: SdpCrypto? = null, savp: Boolean = true,
+    ): String = Sdp.build(sdpSessionId, sdpVersion++, ua.localIp, rtpSocket?.localPort ?: 0, codecs, tePt, direction, crypto, savp)
 
     private fun parseDtmfInfo(req: SipRequest): Pair<Char, Int>? {
         val type = req.contentType ?: return null
@@ -447,5 +484,8 @@ internal class SipCall(
 
     /** Diagnostics for UIs and logs. */
     val mediaStats: String
-        get() = rtp?.let { "rtp tx=${it.packetsSent} rx=${it.packetsReceived} underruns=${it.jitterUnderruns}" } ?: "no media"
+        get() = rtp?.let {
+            "rtp tx=${it.packetsSent} rx=${it.packetsReceived} underruns=${it.jitterUnderruns}" +
+                (if (rtpParams?.srtpTx != null) " srtp authFail=${it.authFailures}" else " plain")
+        } ?: "no media"
 }
