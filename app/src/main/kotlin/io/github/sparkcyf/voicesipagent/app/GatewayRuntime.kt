@@ -832,6 +832,37 @@ class GatewayRuntime private constructor(context: Context) {
         powerPrefs.edit().putBoolean("on", on).putString("state", if (on) r else "").apply()
         _companionPower.value = on
         AppLog.i("companion power mode ${if (on) "ON" else "OFF"}")
+        applyQuiet(on)
+    }
+
+    /** Quiet options (QuietFlags) applied together with the companion power saver. */
+    private val _quietFlags = MutableStateFlow(powerPrefs.getInt("quiet_flags", 0))
+    val quietFlags: StateFlow<Int> = _quietFlags
+
+    fun setQuietFlags(flags: Int) = worker.execute {
+        if (flags == _quietFlags.value) return@execute
+        _quietFlags.value = flags
+        powerPrefs.edit().putInt("quiet_flags", flags).apply()
+        if (_companionPower.value) { applyQuiet(false); applyQuiet(true) }
+    }
+
+    /** Runs on the worker thread. Turning on with no flags just restores any earlier quiet state. */
+    private fun applyQuiet(on: Boolean) {
+        val svc = shizuku.service ?: return
+        val saved = powerPrefs.getString("quiet_state", "").orEmpty()
+        if (!on || _quietFlags.value == 0) {
+            if (saved.isNotEmpty()) {
+                runCatching { svc.setQuietMode(false, 0, saved) }.onFailure { AppLog.w("quiet restore failed", it) }
+                powerPrefs.edit().putString("quiet_state", "").apply()
+                AppLog.i("quiet mode OFF")
+            }
+            return
+        }
+        if (saved.isNotEmpty()) return  // already applied
+        val r = runCatching { svc.setQuietMode(true, _quietFlags.value, "") }
+            .onFailure { AppLog.w("quiet mode failed", it) }.getOrNull() ?: return
+        powerPrefs.edit().putString("quiet_state", r).apply()
+        AppLog.i("quiet mode ON (flags=${_quietFlags.value})")
     }
 
     fun setRegistrarPassword(pw: String) = applySettings(settings.copy(registrarPassword = pw))

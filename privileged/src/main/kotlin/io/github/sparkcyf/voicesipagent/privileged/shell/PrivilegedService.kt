@@ -32,6 +32,7 @@ class PrivilegedService(context: Context) : IPrivilegedService.Stub() {
 
     /** Never held while taking the service or tap monitors (tap close calls back in). */
     private val muteLock = Any()
+    private val deepSilence by lazy { DeepSilence(audioManager) }
     private var muteTapOwner: Any? = null
     private val localOutputMute by lazy {
         LocalOutputMute(object : LocalOutputMute.AudioControl {
@@ -208,8 +209,10 @@ class PrivilegedService(context: Context) : IPrivilegedService.Stub() {
         if (current == null || muteTapOwner == null) return "no tap open"
         // Redirected taps keep working when mode 5 tears down the handset patches. Direct telephony
         // taps need IN_CALL to remain active, so silence only their voice-call output stream.
-        localOutputMute.mute(Build.VERSION.SDK_INT >= 33 && current.usedMethod.startsWith("redirection"))
-            .also { Log.i(TAG, "local mute: $it") }
+        val redirect = Build.VERSION.SDK_INT >= 33 && current.usedMethod.startsWith("redirection")
+        val r = localOutputMute.mute(redirect)
+        val deep = if (!redirect) deepSilence.start() else "n/a"
+        "$r; deep: $deep".also { Log.i(TAG, "local mute: $it") }
     }
 
     private fun onTapClosed(owner: Any) = asHelper {
@@ -224,8 +227,9 @@ class PrivilegedService(context: Context) : IPrivilegedService.Stub() {
     // Tap callbacks may run inside an app's Binder transaction. Always restore as the helper UID.
     private fun restoreLocal(why: String): String = asHelper {
         synchronized(muteLock) {
+            val deep = deepSilence.stop()
             localOutputMute.restore(why).also {
-                if (it != "not muted") Log.i(TAG, "local mute: $it")
+                if (it != "not muted") Log.i(TAG, "local mute: $it; deep: $deep")
             }
         }
     }
@@ -256,6 +260,11 @@ class PrivilegedService(context: Context) : IPrivilegedService.Stub() {
 
     private fun dozeAllowlisted(pkg: String) =
         ShellEnv.run("cmd", "deviceidle", "whitelist").out.lineSequence().any { it.trim().endsWith(",$pkg") || it.contains(",$pkg,") }
+
+    override fun setQuietMode(on: Boolean, flags: Int, savedState: String): String {
+        enforceCaller()
+        return asHelper { QuietProfile.apply(audioManager, on, flags, savedState) }
+    }
 
     override fun setCompanionPowerMode(on: Boolean, packageName: String, savedState: String): String {
         enforceCaller(packageName)

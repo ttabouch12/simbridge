@@ -1,5 +1,20 @@
 # Changelog
 
+## SimBridge 1.1.0
+
+- **SimBridge can be the default SMS app** on the main phone: "Message" buttons in other apps open
+  it (with the text pre-filled), the Phone app's *Reply with message* sends through the SIM, and texts
+  are stored in the system SMS database with no adb step. (Google Messages can't send on a SIM-less
+  phone, so it can't be used to reply.)
+- **Ultimate power saver** options on the SIM phone: *No sounds*, *No vibration*, *Keep the screen
+  off*. Each setting is restored exactly when the power saver is turned off.
+- **Quieter calls on the SIM phone**: local keypad beeps for your key presses are silenced during
+  bridged calls. Where Android allows it, the modem's voice volume is set to 0 too.
+- **Instant reconnection after a gateway restart**: a call or text from a phone the gateway doesn't
+  know yet gets a password challenge instead of being refused, so there's no wait for the next
+  check-in.
+- Deleting a conversation in SimBridge also deletes its copies in the system SMS database.
+
 ## SimBridge 1.0.0
 
 First release of SimBridge, based on voice-sip-agent-selfhost (see [`docs/upstream/CHANGELOG.selfhost.md`](docs/upstream/CHANGELOG.selfhost.md)

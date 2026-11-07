@@ -60,6 +60,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.Checkbox
+import androidx.compose.material.icons.rounded.MobileOff
+import androidx.compose.material.icons.rounded.Vibration
+import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -138,6 +142,7 @@ fun ModernScreen(rt: GatewayRuntime, setTakeover: (Boolean) -> Unit, openAdvance
     val h by rt.health.collectAsState()
     val cur by rt.settingsFlow.collectAsState()
     val power by rt.companionPower.collectAsState()
+    val quiet by rt.quietFlags.collectAsState()
     val battery by rt.battery.collectAsState()
     val log by AppLog.tail.collectAsState()
     var addresses by remember { mutableStateOf(localAddresses()) }
@@ -194,6 +199,13 @@ fun ModernScreen(rt: GatewayRuntime, setTakeover: (Boolean) -> Unit, openAdvance
                     SwitchRow(Icons.Rounded.BatterySaver, "Companion power saver",
                         if (power) "On — only calls, SMS and hotspot stay active" else "Restrict other apps, location, Bluetooth and scanning",
                         power, { rt.setCompanionPower(it) }, enabled = h.shizuku == ShizukuConnector.State.CONNECTED)
+                    // Ultimate saver options, applied while the power saver is on.
+                    QuietRow(Icons.Rounded.NotificationsOff, "No sounds", "Ringtones, notifications, touch and charging sounds",
+                        quiet, 1, rt::setQuietFlags)
+                    QuietRow(Icons.Rounded.Vibration, "No vibration", "Calls, notifications, keyboard and touch feedback",
+                        quiet, 2, rt::setQuietFlags)
+                    QuietRow(Icons.Rounded.MobileOff, "Keep the screen off", "No Always On Display, lift/tap to wake or notification wake-ups",
+                        quiet, 4, rt::setQuietFlags)
                     SwitchRow(Icons.Rounded.VolumeOff, "Keep this phone silent during calls",
                         "The call is heard only on the main phone", cur.muteEarpiece, { rt.setMuteEarpiece(it) })
                 }
@@ -263,6 +275,19 @@ private fun StatusRow(icon: ImageVector, title: String, detail: String, ok: Bool
         trailingContent = {
             if (!(ok && neutralWhenOk)) Box(Modifier.size(10.dp).clip(CircleShape).background(if (ok) Good else Bad))
         },
+    )
+}
+
+@Composable
+private fun QuietRow(icon: ImageVector, title: String, detail: String, flags: Int, bit: Int, set: (Int) -> Unit) {
+    val on = flags and bit != 0
+    ListItem(
+        modifier = Modifier.clickable { set(if (on) flags and bit.inv() else flags or bit) }.padding(start = 24.dp),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        leadingContent = { Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+        headlineContent = { Text(title) },
+        supportingContent = { Text(detail + " · with power saver on") },
+        trailingContent = { Checkbox(checked = on, onCheckedChange = { set(if (it) flags or bit else flags and bit.inv()) }) },
     )
 }
 

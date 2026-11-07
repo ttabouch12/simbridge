@@ -27,7 +27,7 @@ import io.github.simbridge.ui.SettingsScreen
 
 sealed interface Screen {
     data object List : Screen
-    data class Chat(val key: String, val address: String) : Screen
+    data class Chat(val key: String, val address: String, val draft: String = "") : Screen
     data object NewChat : Screen
     data object Settings : Screen
 }
@@ -61,7 +61,7 @@ class MainActivity : ComponentActivity() {
                                 onOpen = { k, a -> screen.value = Screen.Chat(k, a) },
                                 onNew = { screen.value = Screen.NewChat },
                                 onSettings = { screen.value = Screen.Settings })
-                            is Screen.Chat -> ChatScreen(core, cur.key, cur.address) { screen.value = Screen.List }
+                            is Screen.Chat -> ChatScreen(core, cur.key, cur.address, cur.draft) { screen.value = Screen.List }
                             Screen.NewChat -> NewChatScreen(core, { screen.value = Screen.List }) { k, a -> screen.value = Screen.Chat(k, a) }
                             Screen.Settings -> SettingsScreen(core) { screen.value = Screen.List }
                         }
@@ -88,9 +88,11 @@ class MainActivity : ComponentActivity() {
             val address = LinkApp.core(this).store.thread(key).lastOrNull()?.address ?: return@let
             screen.value = Screen.Chat(key, address)
         }
-        if (intent.action == Intent.ACTION_SENDTO) {
+        if (intent.action == Intent.ACTION_SENDTO || intent.action == Intent.ACTION_SEND) {
             val number = intent.data?.schemeSpecificPart?.substringBefore('?')?.trim()
-            if (!number.isNullOrBlank()) screen.value = Screen.Chat(MessageStore.keyOf(number), number)
+                ?.split(',', ';')?.firstOrNull()?.trim()
+            val body = intent.getStringExtra("sms_body") ?: intent.getStringExtra(Intent.EXTRA_TEXT) ?: ""
+            screen.value = if (!number.isNullOrBlank()) Screen.Chat(MessageStore.keyOf(number), number, body) else Screen.NewChat
         }
     }
 

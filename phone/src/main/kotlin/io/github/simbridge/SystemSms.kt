@@ -10,13 +10,13 @@ import android.provider.Telephony
  * Copies relayed texts into Android's own SMS database, so they also appear in the phone's
  * default Messages app (e.g. Google Messages) next to everything else.
  *
- * Android only lets the default SMS app write there, unless the user grants this app the
- * WRITE_SMS app-op once over adb:
+ * Android only lets the default SMS app write there. Either make SimBridge the default SMS app,
+ * or grant it the WRITE_SMS app-op once over adb:
  *     adb shell appops set io.github.simbridge WRITE_SMS allow
  * Without it, texts simply stay in SimBridge.
  */
 object SystemSms {
-    fun permitted(context: Context): Boolean = runCatching {
+    fun permitted(context: Context): Boolean = isDefaultSmsApp(context) || runCatching {
         context.getSystemService(AppOpsManager::class.java)
             .unsafeCheckOpNoThrow("android:write_sms", Process.myUid(), context.packageName) == AppOpsManager.MODE_ALLOWED
     }.getOrDefault(false)

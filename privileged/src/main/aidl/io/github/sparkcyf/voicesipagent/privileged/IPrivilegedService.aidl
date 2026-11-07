@@ -61,4 +61,7 @@ interface IPrivilegedService {
      * on=false restores from [savedState] and returns "". Extra lines go to the log.
      */
     String setCompanionPowerMode(boolean on, String packageName, String savedState) = 12;
+
+    /** Quiet companion mode (no sound / vibration / screen wake per flags); returns state JSON for restore. */
+    String setQuietMode(boolean on, int flags, String savedState) = 13;
 }

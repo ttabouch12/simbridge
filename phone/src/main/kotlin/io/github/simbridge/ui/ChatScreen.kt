@@ -74,12 +74,12 @@ private sealed interface Item {
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun ChatScreen(core: LinkCore, key: String, address: String, onBack: () -> Unit) {
+fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: String = "", onBack: () -> Unit) {
     val ctx = LocalContext.current
     val version by core.store.version.collectAsState()
     val status by core.status.collectAsState()
     var msgs by remember { mutableStateOf(emptyList<Msg>()) }
-    var draft by remember(key) { mutableStateOf("") }
+    var draft by remember(key) { mutableStateOf(initialDraft) }
     var menu by remember { mutableStateOf(false) }
     val contact = remember(address) { core.contacts.lookup(address) }
     val name = contact?.name ?: address

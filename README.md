@@ -51,11 +51,11 @@ main phone only ever uses Wi-Fi. See the [disclaimer](DISCLAIMER.md).
 | 📞 **Calls in the system Phone app** | Incoming calls ring with the normal call screen, contact name and ringtone. Outgoing calls go from the Phone app's keypad or contacts. Calls appear in the call history. |
 | 🔢 **Keypad tones (DTMF)** | Press numbers during a call to navigate phone menus (language selection, "press 1 for…"). |
 | 💬 **Texts (SMS)** | A Google Messages-style app: conversations, contact photos, bubbles, notifications with **Reply** and **Mark as read**, and send status ("Sent" / "Not sent · tap to retry"). |
-| 📥 **Default Messages app (optional)** | Relayed texts can also be copied into Android's SMS database, so they appear in Google Messages or your default SMS app. |
+| 📥 **System SMS integration (optional)** | Make SimBridge the **default SMS app**: "Message" buttons in Contacts and other apps open it, the Phone app's *Reply with message* sends through the SIM, and texts are saved to Android's SMS database. Or keep Google Messages as default and just copy relayed texts into it (read-only, one adb command). |
 | 🔍 **Finds the SIM phone automatically** | Uses mDNS/DNS-SD (`_simbridge._udp`), plus the hotspot's gateway address. Works on home Wi-Fi and on the SIM phone's hotspot. No IP addresses to type, and it reconnects after network changes. |
 | 🔒 **Password protected** | SIP digest authentication, IP-locked calls and texts, and brute-force lockout. Only your main phone can use the SIM. |
-| 🌙 **Quiet SIM phone** | While the main phone is connected, the SIM phone shows no call screen, its screen stays off, and its earpiece is muted. |
-| 🔋 **Power saver mode** | One switch on the SIM phone turns off Bluetooth, location and scanning, and puts every other app to sleep. Turning it off restores everything exactly. |
+| 🌙 **Quiet SIM phone** | While the main phone is connected, the SIM phone shows no call screen, its screen stays off, its call audio is muted, and the local keypad beeps it would play for your key presses are silenced. |
+| 🔋 **Ultimate power saver** | One switch on the SIM phone turns off Bluetooth, location and scanning, and puts every other app to sleep. Optional extras: **no sounds**, **no vibration** and **keep the screen off** (Do Not Disturb, haptics, Always On Display and wake gestures). Turning it off restores every setting exactly. |
 | 🔁 **Survives reboots** | Starts by itself. Status messages ("SIM phone restarted", "Shizuku stopped", "battery low", "unplugged") arrive as texts from "SimBridge Gateway". |
 | 🚫 **No root, no server** | Everything runs on the two phones. Nothing goes through the internet unless you set that up yourself. |
 
@@ -134,8 +134,9 @@ Optional, for setup by cable: [Android platform-tools (adb)](https://developer.a
    app → *SimBridge Gateway*. This lets it answer calls without the SIM phone's own call screen.
    While the main phone is not connected, it shows a simple call screen on the SIM phone.
 6. Under **Security**, set a **password**. Use something long; the main phone needs it once.
-7. Leave **Forward calls & texts** on. Optional: **Keep this phone silent during calls** and
-   **Power saver**.
+7. Leave **Forward calls & texts** on and **Keep this phone silent during calls** on. Optional:
+   **Companion power saver**, with its *No sounds*, *No vibration* and *Keep the screen off* options,
+   for a phone that only bridges calls, texts and data.
 8. Turn on **Mobile hotspot** if the main phone will use it for internet. If both phones are on the
    same Wi-Fi, you don't need the hotspot.
 
@@ -155,10 +156,22 @@ also add both to *Never sleeping apps*.
    - **Stay connected in the background:** tap *Allow* (battery optimization exemption).
 3. That's it. Call from the Phone app as usual, and text from SimBridge.
 
-#### Optional: show texts in your default Messages app
+#### Optional: make SimBridge the default SMS app (recommended)
 
-Android only lets the default SMS app write to the system message database. To let SimBridge copy
-relayed texts there as well, run once from a computer with the main phone connected over USB:
+Settings → **Default SMS app** → *Make default SMS app*. Then:
+- every "Message" / "Send SMS" button (Contacts, Phone app, other apps) opens SimBridge;
+- the Phone app's **Reply with message** on an incoming call sends the text through your SIM;
+- texts are saved to Android's SMS database, and Google Messages can still show them read-only.
+
+Why not reply from Google Messages directly? On a phone without a SIM, Google Messages refuses to
+send at all ("Could not start conversation"). Android offers no way for another app to send on its
+behalf, so the default SMS app has to be SimBridge for replies to work everywhere.
+
+#### Optional: keep Google Messages as default and copy texts into it
+
+If you'd rather keep Google Messages as the default SMS app, SimBridge can still copy relayed texts
+into it so you see them there (read-only). Android only lets the default SMS app write there, so run
+this once from a computer with the main phone connected over USB:
 
 ```sh
 adb shell appops set io.github.simbridge WRITE_SMS allow
@@ -183,6 +196,8 @@ adb shell am broadcast -n $G --es op reg-password --es password 'YOUR-LONG-PASSW
 adb shell am broadcast -n $G --es op takeover --ez on true
 adb shell cmd role add-role-holder android.app.role.DIALER io.github.simbridge.gateway 0
 adb shell am broadcast -n $G --es op provision --ei audio_method 2   # only if calls have no audio (see below)
+adb shell am broadcast -n $G --es op quiet --ei flags 7              # power-saver extras: 1 sound, 2 vibration, 4 screen
+adb shell am broadcast -n $G --es op power --ez on true
 
 # Main phone
 P=io.github.simbridge
@@ -209,6 +224,8 @@ adb shell dumpsys deviceidle whitelist +$P
 ## Limitations
 
 - **Voice and SMS only.** No MMS, RCS, picture messages, or USSD codes.
+- **Google Messages can't send** without a SIM in the main phone. Reply from SimBridge (or make
+  it the default SMS app).
 - **One main phone at a time.** The most recent phone to connect receives calls.
 - **Narrowband audio** (G.711, 8 kHz). It's normal phone-call quality, not HD voice.
 - **No call waiting or hold** for relayed calls.
@@ -230,6 +247,8 @@ adb shell dumpsys deviceidle whitelist +$P
 | No microphone after a main-phone reboot | Open SimBridge once. |
 | Shizuku isn't running after a SIM-phone reboot | Use thedjchi's Shizuku with *Start on boot* + *Watchdog*, and keep Wi-Fi on. Otherwise open Shizuku and tap *Start*. |
 | SIM phone screen lights up during calls | Make SimBridge Gateway the **default phone app** on the SIM phone. |
+| A faint voice is still audible from the SIM phone's earpiece | Android lets the gateway mute the call-volume channel, but some phones (e.g. Samsung on Android 17) keep a minimum earpiece level the modem still drives. It's very quiet and inaudible in a bag or pocket. For total silence, plug in a wired earphone or a USB-C audio adapter with an earphone: calls then route there instead of the earpiece. The catch is that a USB-C adapter blocks charging. |
+| Turning the power saver on takes a minute | It puts every other app to sleep one at a time. Wait until the switch settles. |
 | Texts don't show in Google Messages | Run the `appops` command above and turn the option on. Only new texts are copied. |
 
 ## Security & privacy

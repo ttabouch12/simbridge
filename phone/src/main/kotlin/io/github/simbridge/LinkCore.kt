@@ -233,6 +233,14 @@ class LinkCore(val context: Context) {
 
     // ------------------------------------------------------------------ texts
 
+    /** A text that reached this phone's own SIM (only when it has one and SimBridge is the SMS app). */
+    fun onLocalSms(from: String, body: String) {
+        val time = System.currentTimeMillis()
+        val id = store.add(from, body, outgoing = false, status = Msg.RECEIVED, time = time)
+        SystemSms.insert(context, from, body, time, outgoing = false)?.let { store.setSystemId(id, it) }
+        notifier.showMessages(MessageStore.keyOf(from), from)
+    }
+
     /** Also used by adb tests (ControlReceiver op "test-in"). */
     fun onIncomingText(number: String?, name: String?, text: String) {
         val address = when {
@@ -247,7 +255,7 @@ class LinkCore(val context: Context) {
     }
 
     private fun mirror(id: Long, address: String, text: String, time: Long, outgoing: Boolean) {
-        if (!prefs.mirrorToSystem) return
+        if (!prefs.mirrorToSystem && !isDefaultSmsApp(context)) return
         SystemSms.insert(context, address, text, time, outgoing)?.let { store.setSystemId(id, it) }
     }
 

@@ -63,6 +63,7 @@ import io.github.simbridge.LinkCore
 import io.github.simbridge.LinkService
 import io.github.simbridge.LinkState
 import io.github.simbridge.SystemSms
+import io.github.simbridge.isDefaultSmsApp
 import io.github.simbridge.Telecom
 import kotlinx.coroutines.delay
 
@@ -78,6 +79,8 @@ fun SettingsScreen(core: LinkCore, onBack: () -> Unit) {
     val accountOn = remember(tick) { Telecom.isEnabled(ctx) }
     val batteryOk = remember(tick) { ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val smsRole = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { tick++ }
 
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
@@ -122,8 +125,16 @@ fun SettingsScreen(core: LinkCore, onBack: () -> Unit) {
                 }) { Text("Allow") }
             }
             val mirrorOk = remember(tick) { SystemSms.permitted(ctx) }
+            val smsDefault = remember(tick) { isDefaultSmsApp(ctx) }
             var mirrorOn by remember { mutableStateOf(core.prefs.mirrorToSystem) }
-            Card(Icons.Filled.Sms, "Show texts in your Messages app",
+            Card(Icons.Filled.Sms, "Default SMS app",
+                if (smsDefault) "SimBridge is your SMS app. Texts are saved to the phone, \"Message\" buttons in other apps open SimBridge, and the Phone app's \"Reply with message\" sends through your SIM."
+                else "Optional. Make SimBridge the phone's SMS app so \"Message\" buttons in Contacts and other apps open it, and quick replies to calls work. No computer needed.",
+                ok = true) {
+                if (!smsDefault) FilledTonalButton({ smsRole.launch(ctx.getSystemService(android.app.role.RoleManager::class.java)
+                    .createRequestRoleIntent(android.app.role.RoleManager.ROLE_SMS)) }) { Text("Make default SMS app") }
+            }
+            if (!smsDefault) Card(Icons.Filled.Sms, "Show texts in your Messages app",
                 when {
                     !mirrorOn -> "Off. Texts are only in SimBridge."
                     mirrorOk -> "On. Texts are also copied to your default Messages app. Reply from SimBridge: the Messages app can't send without a SIM."

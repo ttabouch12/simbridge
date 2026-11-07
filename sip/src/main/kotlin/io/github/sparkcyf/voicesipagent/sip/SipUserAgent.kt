@@ -303,6 +303,15 @@ class SipUserAgent(
             it.onRetransmission()
             return
         }
+        if (config.serverMode && (req.method == "INVITE" || req.method == "MESSAGE") && req.to?.tag == null &&
+            calls[req.callId] == null && !fromRegisteredPhone(from) && config.registrarPassword.isNotEmpty()) {
+            // Not registered here (we may have just restarted): challenge it like a REGISTER. The
+            // phone retries with credentials; a valid answer re-learns it as the registered phone.
+            if (!requestAuthPassed(req, from, req.method)) return
+            val user = req.headers["Contact"]?.let { NameAddr.parse(it) }?.let { SipUri.parse(it.uri)?.user }
+                ?: req.from?.sipUri?.user ?: "phone"
+            learnPeer(req.from?.sipUri?.user, user, from, config.registrarLeaseSec.coerceIn(30, 86_400))
+        }
         val tx = ServerTransaction(this, req, from)
         serverTxs[tx.key] = tx
         val call = calls[req.callId]
@@ -434,7 +443,13 @@ class SipUserAgent(
      * Challenge/verify a REGISTER when a registrar password is set. Returns true to let the REGISTER
      * through, false when it was handled here (401 sent, or silently dropped as banned/over-limit).
      */
-    private fun registrarAuthPassed(req: SipRequest, from: InetSocketAddress): Boolean {
+    private fun registrarAuthPassed(req: SipRequest, from: InetSocketAddress): Boolean = requestAuthPassed(req, from, "REGISTER")
+
+    /**
+     * Server mode: digest-check any request from the phone. Returns true when it carries valid
+     * credentials; otherwise answers 401 with a fresh challenge (or drops it while banned).
+     */
+    private fun requestAuthPassed(req: SipRequest, from: InetSocketAddress, method: String): Boolean {
         if (config.registrarPassword.isEmpty()) return true
         val ip = from.address?.hostAddress ?: ""
         val now = System.currentTimeMillis()
@@ -447,7 +462,7 @@ class SipUserAgent(
         }
         val authHeader = req.headers["Authorization"]
         val cred = authHeader?.let { DigestAuth.parseCredentials(it) }
-        val ok = cred != null && DigestAuth.verify(cred, "REGISTER", config.registrarPassword) { nonce ->
+        val ok = cred != null && DigestAuth.verify(cred, method, config.registrarPassword) { nonce ->
             val issuedAt = issuedNonces[nonce]
             issuedAt != null && now - issuedAt <= nonceTtlMs
         }
@@ -465,7 +480,7 @@ class SipUserAgent(
         val resp = buildResponse(req, 401, toTag = newTag())
         resp.headers.add("WWW-Authenticate", DigestAuth.challengeHeader(config.registrarRealm, nonce))
         transport.send(resp, from)
-        log.info("REGISTER challenged (${if (authHeader == null) "no credentials" else "bad credentials"}) from $ip")
+        log.info("${req.method} challenged (${if (authHeader == null) "no credentials" else "bad credentials"}) from $ip")
         return false
     }
 
@@ -511,27 +526,32 @@ class SipUserAgent(
             log.info("phone unregistered (${redactNumber(aorUser)})")
         } else {
             val cUser = contactNa?.let { SipUri.parse(it.uri)?.user } ?: aorUser ?: "phone"
-            // Reach the phone at the address the REGISTER actually came from (NAT/roaming friendly).
-            peerAor = aorUser
-            peerContactUri = "sip:$cUser@${from.address.hostAddress}:${from.port}"
-            serverAddr = from
-            // Use the local address on the phone's network (home Wi-Fi vs. our own hotspot), so
-            // SDP and Contact point somewhere the phone can actually reach.
-            routeTo(from.address)?.hostAddress?.let { if (it != localIp) { log.info("local address now $it"); localIp = it } }
-            peerExpiry?.cancel(false)
-            val holdMs = granted.toLong() * 2 * 1000 + 30_000
-            peerExpiry = schedule(holdMs) {
-                peerAor = null; peerContactUri = null
-                setStatus(false, "phone registration expired")
-                log.info("phone registration expired (no refresh for ${holdMs / 1000}s)")
-            }
-            setStatus(true, "phone registered: ${redactNumber(aorUser)}")
-            log.info("phone registered: $aorUser @ ${from.address.hostAddress}:${from.port} lease=${granted}s hold=${holdMs / 1000}s")
+            learnPeer(aorUser, cUser, from, granted)
         }
         val resp = buildResponse(req, 200, toTag = newTag())
         if (contactHeader != null) resp.headers.add("Contact", "$contactHeader;expires=$granted")
         resp.headers.add("Expires", granted.toString())
         transport.send(resp, from)
+    }
+
+    /** Server mode: remember where the single phone is reachable (from a REGISTER or an authenticated request). */
+    private fun learnPeer(aorUser: String?, contactUser: String, from: InetSocketAddress, granted: Int) {
+        // Reach the phone at the address the request actually came from (NAT/roaming friendly).
+        peerAor = aorUser
+        peerContactUri = "sip:$contactUser@${from.address.hostAddress}:${from.port}"
+        serverAddr = from
+        // Use the local address on the phone's network (home Wi-Fi vs. our own hotspot), so
+        // SDP and Contact point somewhere the phone can actually reach.
+        routeTo(from.address)?.hostAddress?.let { if (it != localIp) { log.info("local address now $it"); localIp = it } }
+        peerExpiry?.cancel(false)
+        val holdMs = granted.toLong() * 2 * 1000 + 30_000
+        peerExpiry = schedule(holdMs) {
+            peerAor = null; peerContactUri = null
+            setStatus(false, "phone registration expired")
+            log.info("phone registration expired (no refresh for ${holdMs / 1000}s)")
+        }
+        setStatus(true, "phone registered: ${redactNumber(aorUser)}")
+        log.info("phone registered: $aorUser @ ${from.address.hostAddress}:${from.port} lease=${granted}s hold=${holdMs / 1000}s")
     }
 
     // ---------------------------------------------------------------- helpers used by SipCall
