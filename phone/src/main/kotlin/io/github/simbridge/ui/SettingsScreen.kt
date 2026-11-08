@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Button
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -187,6 +188,7 @@ fun SettingsScreen(core: LinkCore, onSimPhone: () -> Unit = {}, onBlocked: () ->
                 }
                 TextButton(onRecordings) { Text(stringResource(R.string.recordings)) }
             }
+            TranslationCard(core)
             val exportLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
                 androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json")) { uri ->
                 uri ?: return@rememberLauncherForActivityResult
@@ -321,3 +323,40 @@ private fun localIp(): String? = runCatching {
     java.net.NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
         .flatMap { it.inetAddresses.toList() }.firstOrNull { it is java.net.Inet4Address && it.isSiteLocalAddress }?.hostAddress
 }.getOrNull()
+
+@Composable
+private fun TranslationCard(core: LinkCore) {
+    val ctx = LocalContext.current
+    val prefs = core.prefs
+    var mode by remember { mutableStateOf(prefs.translateMode) }
+    var onDevice by remember { mutableStateOf(prefs.translateOnDevice) }
+    var key by remember { mutableStateOf(prefs.groqKey) }
+    var model by remember { mutableStateOf(prefs.translateModel) }
+    var showKey by remember { mutableStateOf(false) }
+    Card(Icons.Filled.Translate, stringResource(R.string.set_translate), stringResource(R.string.set_translate_text), ok = true) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(io.github.simbridge.TranslateMode.OFF to R.string.tr_off, io.github.simbridge.TranslateMode.CAPTIONS to R.string.tr_captions,
+                io.github.simbridge.TranslateMode.VOICE to R.string.tr_voice).forEach { (m, label) ->
+                androidx.compose.material3.FilterChip(mode == m, { mode = m; prefs.translateMode = m }, { Text(stringResource(label)) })
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.set_translate_offline), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            Switch(onDevice, {
+                onDevice = it; prefs.translateOnDevice = it
+                if (it) { io.github.simbridge.OfflineTranslate.prepare(ctx); io.github.simbridge.OnDeviceStt.prepare(ctx) }
+            })
+        }
+        if (!onDevice) {
+            OutlinedTextField(key, { key = it; prefs.groqKey = it }, Modifier.fillMaxWidth(), singleLine = true,
+                label = { Text(stringResource(R.string.set_groq_key)) },
+                visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = { IconButton({ showKey = !showKey }) { Icon(if (showKey) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, null) } })
+            OutlinedTextField(model, { model = it; prefs.translateModel = it }, Modifier.fillMaxWidth(), singleLine = true,
+                label = { Text(stringResource(R.string.set_translate_model)) })
+            TextButton({ ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://console.groq.com/keys"))) }) {
+                Text(stringResource(R.string.set_groq_get))
+            }
+        }
+    }
+}

@@ -79,5 +79,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     // QR scanning for pairing via Google Play services (no camera permission needed).
     "fullImplementation"("com.google.android.gms:play-services-code-scanner:16.1.0")
+    // On-device Turkish/English translation for call captions (offline fallback).
+    "fullImplementation"("com.google.mlkit:translate:17.0.3")
 }
 

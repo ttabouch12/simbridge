@@ -206,4 +206,15 @@
     <string name="unpair_text">Bir SIM telefonunun kodunu tekrar tarayana kadar aramalar ve mesajlar durur.</string>
     <string name="you">Siz</string>
     <string name="you_prefix">Siz: </string>
+    <string name="translate">Çevir</string>
+    <string name="tr_off">Kapalı</string>
+    <string name="tr_captions">Altyazı</string>
+    <string name="tr_voice">Altyazı + ses</string>
+    <string name="tr_no_call">Devam eden arama yok: son arama gösteriliyor.</string>
+    <string name="set_translate">Arama çevirisi (Türkçe ↔ İngilizce)</string>
+    <string name="set_translate_text">Altyazı: arayanın Türkçesi burada İngilizce görünür (arama bildirimindeki Çevir\'e dokunun). Altyazı + ses: ayrıca İngilizceniz karşı tarafa Türkçe okunur. Konuşurken okumak için hoparlör veya kulaklık kullanın. Gerektiğinde arayana sesinin işlendiğini söyleyin.</string>
+    <string name="set_translate_offline">Yalnızca cihazda (gizli, daha az doğru)</string>
+    <string name="set_groq_key">Groq API anahtarı (ücretsiz)</string>
+    <string name="set_translate_model">Çeviri modeli</string>
+    <string name="set_groq_get">console.groq.com adresinden ücretsiz anahtar alın</string>
 </resources>

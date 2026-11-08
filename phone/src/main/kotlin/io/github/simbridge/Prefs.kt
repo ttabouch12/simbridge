@@ -105,6 +105,26 @@ class Prefs(context: Context) {
         get() = p.getBoolean("block_hidden", false)
         set(v) = p.edit().putBoolean("block_hidden", v).apply()
 
+    /** Calls: translation mode each call starts in (can be changed during the call). */
+    var translateMode: TranslateMode
+        get() = runCatching { TranslateMode.valueOf(p.getString("translate_mode", null) ?: "OFF") }.getOrDefault(TranslateMode.OFF)
+        set(v) = p.edit().putString("translate_mode", v.name).apply()
+
+    /** Translation: never send call audio to the cloud (less accurate). */
+    var translateOnDevice: Boolean
+        get() = p.getBoolean("translate_on_device", false)
+        set(v) = p.edit().putBoolean("translate_on_device", v).apply()
+
+    /** Translation: free Groq API key, encrypted like the pairing secrets. */
+    var groqKey: String
+        get() = p.getString("groq_sealed", null)?.let(::unseal) ?: ""
+        set(v) { if (v.isBlank()) p.edit().remove("groq_sealed").apply() else p.edit().putString("groq_sealed", seal(v.trim())).apply() }
+
+    /** Translation: Groq chat model used for text translation. */
+    var translateModel: String
+        get() = p.getString("translate_model", null)?.takeIf { it.isNotBlank() } ?: "openai/gpt-oss-120b"
+        set(v) = p.edit().putString("translate_model", v.trim()).apply()
+
     fun isBlocked(number: String?): Boolean {
         return blocked.any { io.github.sparkcyf.voicesipagent.voice.PhoneNumbers.same(number, it) }
     }

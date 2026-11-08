@@ -207,4 +207,15 @@
     <string name="unpair_text">Calls and texts stop until you scan a SIM phone\'s code again.</string>
     <string name="you">You</string>
     <string name="you_prefix">You: </string>
+    <string name="translate">Translate</string>
+    <string name="tr_off">Off</string>
+    <string name="tr_captions">Captions</string>
+    <string name="tr_voice">Captions + voice</string>
+    <string name="tr_no_call">No call in progress: showing the last call.</string>
+    <string name="set_translate">Call translation (Turkish ↔ English)</string>
+    <string name="set_translate_text">Captions: the caller\'s Turkish shows here in English (tap Translate in the call notification). Captions + voice: also, your English is spoken to them in Turkish. Use the speaker or earbuds to read while talking. Tell the caller their voice is processed when required.</string>
+    <string name="set_translate_offline">On-device only (private, less accurate)</string>
+    <string name="set_groq_key">Groq API key (free)</string>
+    <string name="set_translate_model">Translation model</string>
+    <string name="set_groq_get">Get a free key at console.groq.com</string>
 </resources>

@@ -77,6 +77,14 @@
             android:taskAffinity=""
             android:theme="@style/Trampoline" />
 
+        <!-- Live call captions; shows over the lock screen, its own task so Back returns to the call. -->
+        <activity
+            android:name=".CaptionActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity="io.github.simbridge.captions"
+            android:showWhenLocked="true" />
+
         <receiver android:name=".RecordReceiver" android:exported="false" />
 
         <provider
