@@ -306,6 +306,12 @@ adb shell dumpsys deviceidle whitelist +$P
 
 *Main phone → Settings → Call translation.*
 
+<p align="center">
+  <img src="docs/images/simbridge-translation-popup.png" width="280" alt="Translation popup over the call screen: the caller's Turkish shown in English">
+  &nbsp;&nbsp;
+  <img src="docs/images/simbridge-translation-settings.png" width="280" alt="Call translation settings: languages and translation engine">
+</p>
+
 1. Pick **Caller speaks** and **I speak**.
 2. Paste a free **Groq** key (https://console.groq.com/keys). Groq is used for speech recognition (Whisper) and, by default, for translation.
 3. Choose what each call starts with: **Off**, **Captions** (you read the caller's words in your language) or **Captions + voice** (also, your words are spoken to the caller in their language, instead of your own voice).
