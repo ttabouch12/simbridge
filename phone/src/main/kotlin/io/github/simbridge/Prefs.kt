@@ -52,7 +52,9 @@ class Prefs(context: Context) {
         get() = p.getString("last_host", null)
         set(v) = p.edit().putString("last_host", v).apply()
 
-    val user: String get() = "phone"
+    /** SIP user, unique per phone so the SIM phone can ring several main phones. */
+    val user: String get() = p.getString("sip_user", null) ?: ("phone-" + java.util.UUID.randomUUID().toString().take(6))
+        .also { p.edit().putString("sip_user", it).apply() }
 
     /** Also copy texts into the system SMS database (shows them in the default Messages app). */
     var mirrorToSystem: Boolean
@@ -68,6 +70,23 @@ class Prefs(context: Context) {
     var outgoingSim: Int
         get() = p.getInt("outgoing_sim", 0)   // 0 = SIM phone's default
         set(v) = p.edit().putInt("outgoing_sim", v).apply()
+
+    /** Numbers whose calls and texts are refused at the SIM phone. */
+    var blocked: Set<String>
+        get() = p.getStringSet("blocked", emptySet()).orEmpty().toSortedSet()
+        set(v) = p.edit().putStringSet("blocked", v.toSet()).apply()
+
+    /** Also refuse calls with no caller ID. */
+    var blockHidden: Boolean
+        get() = p.getBoolean("block_hidden", false)
+        set(v) = p.edit().putBoolean("block_hidden", v).apply()
+
+    fun isBlocked(number: String?): Boolean {
+        val d = number?.filter(Char::isDigit).orEmpty()
+        if (d.length < 3) return false
+        return blocked.any { b -> val e = b.filter(Char::isDigit); val k = minOf(9, d.length, e.length)
+            k >= 3 && d.takeLast(k) == e.takeLast(k) && (k >= 9 || d.length == e.length) }
+    }
 
     private fun key(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

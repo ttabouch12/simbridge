@@ -8,8 +8,9 @@ to the main phone, and the main phone makes calls and sends texts through the SI
 phone's own hotspot or over any Wi-Fi network the two phones share.
 
 On the main phone it feels native. Calls ring in the **system Phone app**, with its call screen, call
-history, contact names and keypad. Texts appear in a Google Messages-style app, and can optionally be
-copied into your **default Messages app** too.
+history, contact names and keypad. Texts, picture messages and group chats appear in a Google
+Messages-style app, and can optionally be copied into your **default Messages app** too. Everything
+between the two phones is **encrypted** (TLS + SRTP) and locked to the phones you paired with a QR code.
 
 [**⬇ Download the latest release**](../../releases/latest) ·
 [How it works](#how-it-works) · [Setup](#setup) · [FAQ & troubleshooting](#troubleshooting) ·
@@ -49,13 +50,20 @@ main phone only ever uses Wi-Fi. See the [disclaimer](DISCLAIMER.md).
 | | |
 |---|---|
 | 📞 **Calls in the system Phone app** | Incoming calls ring with the normal call screen, contact name and ringtone. Outgoing calls go from the Phone app's keypad or contacts. Calls appear in the call history. |
-| 🔢 **Keypad tones (DTMF)** | Press numbers during a call to navigate phone menus (language selection, "press 1 for…"). |
-| 💬 **Texts (SMS)** | A Google Messages-style app: conversations, contact photos, bubbles, notifications with **Reply** and **Mark as read**, and send status ("Sent" / "Not sent · tap to retry"). |
-| 📥 **System SMS integration (optional)** | Make SimBridge the **default SMS app**: "Message" buttons in Contacts and other apps open it, the Phone app's *Reply with message* sends through the SIM, and texts are saved to Android's SMS database. Or keep Google Messages as default and just copy relayed texts into it (read-only, one adb command). |
-| 🔍 **Finds the SIM phone automatically** | Uses mDNS/DNS-SD (`_simbridge._udp`), plus the hotspot's gateway address. Works on home Wi-Fi and on the SIM phone's hotspot. No IP addresses to type, and it reconnects after network changes. |
-| 🔒 **Password protected** | SIP digest authentication, IP-locked calls and texts, and brute-force lockout. Only your main phone can use the SIM. |
-| 🌙 **Quiet SIM phone** | While the main phone is connected, the SIM phone shows no call screen, its screen stays off, its call audio is muted, and the local keypad beeps it would play for your key presses are silenced. |
-| 🔋 **Ultimate power saver** | One switch on the SIM phone turns off Bluetooth, location and scanning, and puts every other app to sleep. Optional extras: **no sounds**, **no vibration** and **keep the screen off** (Do Not Disturb, haptics, Always On Display and wake gestures). Turning it off restores every setting exactly. |
+| 🎧 **HD voice** | 16 kHz wideband audio between the phones (L16), falling back to normal phone quality (G.711) when needed. |
+| 🔒 **Encrypted and paired** | Pair once by scanning a QR code. Signalling runs over **TLS** pinned to the SIM phone's key, audio over **SRTP**, and every call or text needs the paired password. Mobile-data and internet addresses are refused. |
+| 💬 **Texts, pictures and group chats** | A Google Messages-style app: conversations, contact photos, bubbles, notifications with **Reply** and **Mark as read**, **Sent / Delivered** reports, picture messages (MMS) and **group texts**. |
+| 📥 **System SMS integration (optional)** | Make SimBridge the **default SMS app**: "Message" buttons in Contacts and other apps open it, the Phone app's *Reply with message* sends through the SIM, and texts are saved to Android's SMS database. Or keep Google Messages as default and just copy relayed texts into it (read-only). |
+| 📵 **Missed calls while offline** | Calls the SIM phone gets while the main phone is out of reach are added to the Phone app's history with a *Call back* notification. |
+| 🚫 **Call blocking** | Block numbers (and hidden callers). The SIM phone rejects them before they ring. With SimBridge as the default SMS app, numbers blocked in the Phone app are included too. |
+| 📶 **SIM phone dashboard** | Signal, network type, battery, data and hotspot of the SIM phone, plus **USSD codes** (balance, data left) and remote switches: battery saver, mobile data, hotspot (experimental), *Ring it* to find the SIM phone, *Restart link*. |
+| 🎙️ **Call recording** | A **Record** button in the call notification, or record every call. Recordings are saved on the main phone (Recordings/SimBridge). |
+| 📱📱 **Dual SIM and several main phones** | A dual-SIM gateway shows up as *SIM 1* and *SIM 2* calling accounts; texts reply on the line they came in on. Pair up to four main phones: calls ring on all of them, the first to answer gets the call. |
+| ⌚ **Watch and car friendly** | Conversation notifications work on Wear OS and Android Auto (read aloud, reply by voice). |
+| 💾 **Backup** | Export texts, blocked numbers and settings to a file, and import them on a new phone. |
+| 🔍 **Finds the SIM phone automatically** | mDNS/DNS-SD (`_simbridge._udp`), the last address that worked, and the hotspot's gateway address. No IP addresses to type. |
+| 🌙 **Quiet SIM phone** | While the main phone is connected, the SIM phone shows no call screen, its screen stays off and its call audio is muted. |
+| 🔋 **Ultimate power saver** | One switch on the SIM phone turns off Bluetooth, location and scanning, and puts every other app to sleep (in seconds). Optional extras: **no sounds**, **no vibration** and **keep the screen off**. Turning it off restores every setting exactly. |
 | 🔁 **Survives reboots** | Starts by itself. Status messages ("SIM phone restarted", "Shizuku stopped", "battery low", "unplugged") arrive as texts from "SimBridge Gateway". |
 | 🚫 **No root, no server** | Everything runs on the two phones. Nothing goes through the internet unless you set that up yourself. |
 
@@ -64,12 +72,12 @@ main phone only ever uses Wi-Fi. See the [disclaimer](DISCLAIMER.md).
 ```
 ┌────────────────────────────┐        Wi-Fi / SIM phone's hotspot        ┌─────────────────────────────┐
 │  SIM phone                 │ ◄──────────────────────────────────────► │  Main phone (no SIM)        │
-│  "SimBridge Gateway"       │     SIP over UDP (port 5062) + RTP audio  │  "SimBridge"                │
-│                            │     mDNS: _simbridge._udp                 │                             │
-│  cellular call ◄──► call   │                                           │  Telecom ConnectionService  │
-│  audio tap (via Shizuku)   │     INVITE / BYE / RFC 4733 DTMF          │   → system Phone app UI     │
-│  SMS in/out (SmsManager)   │     SIP MESSAGE (texts, status alerts)    │  Messages-style app         │
-│  built-in SIP registrar    │                                           │   (+ optional copy to the   │
+│  "SimBridge Gateway"       │   SIP over TLS (port 5063, pinned key)    │  "SimBridge"                │
+│                            │   SRTP audio (AES-128, 16 kHz L16 / G.711)│                             │
+│  cellular call ◄──► call   │   mDNS: _simbridge._udp                   │  Telecom ConnectionService  │
+│  audio tap (via Shizuku)   │   INVITE / BYE / RFC 4733 DTMF            │   → system Phone app UI     │
+│  SMS/MMS in/out            │   SIP MESSAGE: texts + JSON control       │  Messages-style app         │
+│  built-in SIP registrar    │   (status, USSD, switches, events)        │   (+ optional copy to the   │
 │                            │                                           │    system SMS database)     │
 └────────────────────────────┘                                           └─────────────────────────────┘
 ```
@@ -84,6 +92,12 @@ main phone only ever uses Wi-Fi. See the [disclaimer](DISCLAIMER.md).
 - **SimBridge** (main phone) registers to the gateway with the same pure-Kotlin SIP stack. It
   registers a calling account with Android's Telecom framework, so the system Phone app handles the
   call UI. Audio goes through the main phone's microphone and earpiece, with echo cancellation.
+- **Pairing:** the gateway makes an EC P-256 key in the Android Keystore and shows a QR code with its
+  key fingerprint and a random password. The main phone keeps both encrypted with its own Keystore
+  key, accepts only that key in the TLS handshake, and proves the password (digest) on every call and
+  text. The SRTP keys for each call travel inside that TLS connection (SDES, RFC 4568).
+- **Control channel:** dashboard, USSD, remote switches, block lists, delivery reports and missed-call
+  events are small JSON messages (`application/vnd.simbridge+json`) on the same authenticated link.
 
 ## Requirements
 
@@ -99,6 +113,7 @@ main phone only ever uses Wi-Fi. See the [disclaimer](DISCLAIMER.md).
 - Android **14 or newer**. Tested on a **Google Pixel 9 (Android 17)**. The system Phone app must
   support third-party calling accounts (Google Phone does).
 - Same Wi-Fi network as the SIM phone, **or** connected to the SIM phone's hotspot.
+- Google Play services for the QR scanner (or paste the pairing link instead).
 
 ## Downloads
 
@@ -133,11 +148,14 @@ Optional, for setup by cable: [Android platform-tools (adb)](https://developer.a
 5. **Make it the default phone app** when asked, or later in Settings → Apps → Default apps → Phone
    app → *SimBridge Gateway*. This lets it answer calls without the SIM phone's own call screen.
    While the main phone is not connected, it shows a simple call screen on the SIM phone.
-6. Under **Security**, set a **password**. Use something long; the main phone needs it once.
-7. Leave **Forward calls & texts** on and **Keep this phone silent during calls** on. Optional:
+6. Under **Security**, tap **Pair a phone**. A QR code appears (you'll scan it in step 2).
+7. Optional, for picture messages and group texts: under **Picture & group messages** tap
+   **Make SMS app**. Android only delivers MMS to the default SMS app. Texts reach the main phone
+   either way.
+8. Leave **Forward calls & texts** on and **Keep this phone silent during calls** on. Optional:
    **Companion power saver**, with its *No sounds*, *No vibration* and *Keep the screen off* options,
    for a phone that only bridges calls, texts and data.
-8. Turn on **Mobile hotspot** if the main phone will use it for internet. If both phones are on the
+9. Turn on **Mobile hotspot** if the main phone will use it for internet. If both phones are on the
    same Wi-Fi, you don't need the hotspot.
 
 Recommended: Settings → Battery → set SimBridge Gateway and Shizuku to **Unrestricted**. On Samsung,
@@ -148,13 +166,23 @@ also add both to *Never sleeping apps*.
 1. **Install `SimBridge.apk`** and open it. Allow microphone, contacts, phone, notifications and
    *nearby devices / local network*.
 2. Open **Settings** (⚙ in the search bar):
-   - **Gateway password:** enter the password from step 1.6 → *Save*. The status chip changes to
-     **Connected via Wi-Fi** or **Connected via hotspot**.
+   - **Pair with SIM phone:** tap *Scan code* and scan the QR code from step 1.6, then confirm. (No
+     Play services? Tap *Paste link* and paste the `simbridge://pair?…` link, or open that link on
+     the main phone.) The status changes to **Connected via Wi-Fi** or **Connected via hotspot**.
    - **Calls in the Phone app:** tap *Open calling accounts* and turn on **SimBridge**. In Google
      Phone this is Settings → Calling accounts → All calling accounts. If the main phone has no SIM of
      its own, set SimBridge as the account to **make calls with**.
    - **Stay connected in the background:** tap *Allow* (battery optimization exemption).
+   - Allow the **call log** permission when asked, so missed calls from while you were offline show
+     up in the Phone app.
 3. That's it. Call from the Phone app as usual, and text from SimBridge.
+
+To use **several main phones**, scan the same QR code on each (up to four). A dual-SIM gateway adds
+*SIM 1* and *SIM 2* calling accounts on the main phone: turn them on in the Phone app's calling
+accounts to choose the SIM per call.
+
+> **Upgrading from 1.x?** The connection is now encrypted, so the old password setting is gone.
+> Open *Pair a phone* on the SIM phone and scan the code once on the main phone.
 
 #### Optional: make SimBridge the default SMS app (recommended)
 
@@ -192,16 +220,17 @@ the `DUMP` permission).
 ```sh
 # SIM phone
 G=io.github.simbridge.gateway/io.github.sparkcyf.voicesipagent.app.AdbControlReceiver
-adb shell am broadcast -n $G --es op reg-password --es password 'YOUR-LONG-PASSWORD'
 adb shell am broadcast -n $G --es op takeover --ez on true
 adb shell cmd role add-role-holder android.app.role.DIALER io.github.simbridge.gateway 0
+adb shell cmd role add-role-holder android.app.role.SMS io.github.simbridge.gateway 0   # optional: MMS
+adb shell am broadcast -n $G --es op pair-link        # prints the simbridge://pair?… link
 adb shell am broadcast -n $G --es op provision --ei audio_method 2   # only if calls have no audio (see below)
 adb shell am broadcast -n $G --es op quiet --ei flags 7              # power-saver extras: 1 sound, 2 vibration, 4 screen
 adb shell am broadcast -n $G --es op power --ez on true
 
-# Main phone
+# Main phone (put the link from pair-link in single quotes)
 P=io.github.simbridge
-adb shell am broadcast -n $P/.ControlReceiver --es op password --es password 'YOUR-LONG-PASSWORD'
+adb shell "am broadcast -n $P/.ControlReceiver --es op pair --es link 'simbridge://pair?v=2&…'"
 adb shell telecom set-phone-account-enabled $P/$P.GatewayConnectionService simbridge 0
 adb shell telecom set-user-selected-outgoing-phone-account $P/$P.GatewayConnectionService simbridge 0
 adb shell dumpsys deviceidle whitelist +$P
@@ -212,26 +241,40 @@ adb shell dumpsys deviceidle whitelist +$P
 - **Calls:** dial from the Phone app, contacts, or the call button in a SimBridge chat. Incoming
   calls ring like normal calls. Mute, speaker, Bluetooth and the keypad all work from the call
   screen.
-- **Texts:** open SimBridge. *Start chat* picks a contact or takes a number. Reply straight from
-  notifications.
+- **Recording:** during a call, pull down the notification shade and tap **Record** on the
+  SimBridge notification (or turn on *Settings → Call recording → Record every call*). Files are in
+  *Recordings/SimBridge* and in *Settings → Call recording → Recordings*. Check your local law:
+  many places require telling the other person.
+- **Texts:** open SimBridge. *Start chat* picks a contact or takes a number; type several numbers
+  separated by commas for a **group**. The 🖼 button adds pictures (they're resized to fit MMS
+  limits). Reply straight from notifications, your watch or your car.
+- **SIM phone:** *Settings → SIM phone* shows signal, battery, data and hotspot, runs **USSD codes**
+  like `*100#`, and has the remote switches (*Ring it* plays a loud alarm on the SIM phone for a
+  minute).
+- **Blocking:** *Settings → Blocked numbers*. Blocked calls are rejected by the SIM phone and logged
+  as blocked; texts from blocked numbers are dropped.
+- **Backup:** *Settings → Backup → Export* saves a `.json` file you can *Import* on another phone.
 - **Status:** the chip at the top of SimBridge shows the connection. The SIM phone texts you (as
   *SimBridge Gateway*) if it restarted, Shizuku stopped, the battery is low or it was unplugged.
-- **After restarting the main phone**, open SimBridge once. Android only grants background
-  microphone access to an app that was opened since boot.
+- **After restarting or updating the main phone**, the first call shows *Your microphone is off for
+  this call*: tap it once (Android only gives background microphone access to an app you've opened).
+  Opening SimBridge once after a restart avoids it.
 - **After restarting the SIM phone**, everything restarts by itself, including Shizuku with
   thedjchi's version (it needs Wi-Fi on once). You get a text when it's back.
 
 ## Limitations
 
-- **Voice and SMS only.** No MMS, RCS, picture messages, or USSD codes.
+- **No RCS**, and **no voicemail** relay. USSD menus that need replies (multi-step) aren't supported,
+  only single codes.
+- **MMS needs SimBridge Gateway as the SIM phone's default SMS app**, and mobile data on. Pictures
+  and group texts aren't copied into the main phone's system SMS database (only plain texts are).
 - **Google Messages can't send** without a SIM in the main phone. Reply from SimBridge (or make
   it the default SMS app).
-- **One main phone at a time.** The most recent phone to connect receives calls.
-- **Narrowband audio** (G.711, 8 kHz). It's normal phone-call quality, not HD voice.
 - **No call waiting or hold** for relayed calls.
-- **Local network only by default.** The phones must share a Wi-Fi network or the hotspot. Reaching
-  the gateway over the internet needs your own VPN (e.g. WireGuard/Tailscale). Don't expose port 5062
-  to the internet.
+- **Local network only.** The phones must share a Wi-Fi network or the hotspot; the gateway refuses
+  requests from mobile-data and public addresses. To reach it from elsewhere, put both phones on your
+  own VPN (e.g. WireGuard/Tailscale).
+- **Hotspot remote switch is experimental**: some phones don't let apps turn the hotspot on.
 - **Emergency calls** should be made from a phone with a SIM. Most phones can still place emergency
   calls without a SIM. SimBridge never handles emergency numbers.
 - The SIM phone must stay **powered and in range**: it is the phone line.
@@ -240,26 +283,41 @@ adb shell dumpsys deviceidle whitelist +$P
 
 | Problem | Fix |
 |---|---|
-| Main phone says *Looking for your SIM phone…* | Both phones on the same Wi-Fi (or main phone on the hotspot)? Is SimBridge Gateway open, with **Forward calls & texts** on? Check that the password matches. Some routers block mDNS or isolate devices: use the hotspot, or turn off "AP/client isolation". |
-| *The SIM phone rejected the password* | Re-enter the same password on both phones. After 5 wrong tries the gateway ignores that device for 10 minutes. |
+| Main phone says *Looking for your SIM phone…* | Both phones on the same Wi-Fi (or main phone on the hotspot)? Is SimBridge Gateway open, with **Forward calls & texts** on? Some routers block mDNS or isolate devices: use the hotspot, or turn off "AP/client isolation". |
+| *The SIM phone rejected this phone* / *key changed* | Scan the SIM phone's code again (*Pair a phone*). This is expected after *New key* on the SIM phone. After 5 wrong tries the gateway ignores that device for 10 minutes. |
+| *Your microphone is off for this call* | Tap the notification once. It happens on the first call after the main phone restarted or SimBridge was updated. |
+| Picture messages don't arrive | Make SimBridge Gateway the SIM phone's SMS app (*Picture & group messages*) and keep mobile data on. |
+| Missed calls don't appear in the Phone app | Allow SimBridge's *call log* permission (Android settings → Apps → SimBridge → Permissions). |
 | Calls connect but **no sound** | On the SIM phone: SimBridge Gateway → ⚙ (top right) → **Cellular audio** → try *Direct telephony*, then *Call redirection*. Check that Shizuku is running. |
 | Calls don't ring on the main phone | Turn on the **SimBridge** calling account (main phone Settings → Calls in the Phone app). |
 | No microphone after a main-phone reboot | Open SimBridge once. |
 | Shizuku isn't running after a SIM-phone reboot | Use thedjchi's Shizuku with *Start on boot* + *Watchdog*, and keep Wi-Fi on. Otherwise open Shizuku and tap *Start*. |
 | SIM phone screen lights up during calls | Make SimBridge Gateway the **default phone app** on the SIM phone. |
 | A faint voice is still audible from the SIM phone's earpiece | Android lets the gateway mute the call-volume channel, but some phones (e.g. Samsung on Android 17) keep a minimum earpiece level the modem still drives. It's very quiet and inaudible in a bag or pocket. For total silence, plug in a wired earphone or a USB-C audio adapter with an earphone: calls then route there instead of the earpiece. The catch is that a USB-C adapter blocks charging. |
-| Turning the power saver on takes a minute | It puts every other app to sleep one at a time. Wait until the switch settles. |
+| Turning the power saver on takes a few seconds | It puts every other app to sleep, eight at a time. Wait until the switch settles. |
 | Texts don't show in Google Messages | Run the `appops` command above and turn the option on. Only new texts are copied. |
 
 ## Security & privacy
 
 - All traffic stays on your local network. SimBridge has no servers, accounts, analytics or ads.
-- SIP signalling and audio are **not encrypted** (plain SIP/RTP on the LAN). The password is never
-  sent in clear (digest auth). Only use SimBridge on networks you trust, such as your home Wi-Fi or
-  your own hotspot. Use a strong hotspot password.
-- Only the device that registered with the password can place calls or send texts, checked by IP.
-  Repeated wrong passwords are blocked.
+- **Pairing** is a QR code shown on the SIM phone: it carries the gateway's key fingerprint
+  (SHA-256 of its public key) and a random 20-character password. The SIM phone's private key never
+  leaves its Android Keystore. The main phone stores the pairing encrypted with a Keystore key.
+- **Signalling** runs over TLS 1.3 to port 5063, and the main phone accepts only the paired key, so
+  an impostor on the same Wi-Fi can't pose as your SIM phone. **Audio** is SRTP
+  (AES_CM_128_HMAC_SHA1_80); unencrypted calls are refused.
+- **Every** call and text from a main phone carries a fresh digest answer (single-use nonce), so
+  a spoofed source address can't use the SIM. In-call requests are only accepted from the phone that
+  owns the call. Repeated wrong passwords are blocked.
+- The gateway only accepts private LAN addresses, and only when the route back is over Wi-Fi or the
+  hotspot, never mobile data. Its mDNS name is generic (`SimBridge-xxxxxx`).
+- *New key* on the SIM phone unpairs every main phone at once (e.g. if one was lost).
+- *Allow other SIP apps* (off by default) re-opens plain SIP/UDP on port 5062 for softphones like
+  baresip. It's unencrypted: leave it off unless you need it.
 - Shizuku grants powerful system access to apps you approve. Only approve apps you trust.
+- Tests: `sip/src/test` checks SRTP against the RFC 3711 test vectors, tamper and replay rejection,
+  pinned-TLS registration, refusal of wrong keys and passwords, forged UDP requests, HD voice and
+  call forking to several phones.
 
 ## Building from source
 
@@ -292,6 +350,9 @@ SimBridge stands on the work of others. Thank you to:
   through the Apache-2.0 [Shizuku-API](https://github.com/RikkaApps/Shizuku-API).
 - **[baresip](https://github.com/baresip/baresip) / [baresip-studio](https://github.com/juha-h/baresip-studio)**:
   the softphone used while developing and testing the gateway.
+- **[ZXing](https://github.com/zxing/zxing)** (Apache-2.0): the pairing QR code on the SIM phone.
+- **Google code scanner** ([ML Kit / Play services](https://developers.google.com/ml-kit/vision/barcode-scanning/code-scanner)):
+  scanning that code on the main phone, without a camera permission.
 - Android Jetpack (Compose, Material 3, Material Icons) and Kotlin coroutines.
 
 The full upstream commit history is kept in this repository. Upstream READMEs and docs are in

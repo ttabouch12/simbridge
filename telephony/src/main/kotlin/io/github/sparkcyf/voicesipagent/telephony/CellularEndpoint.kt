@@ -122,12 +122,12 @@ class CellularEndpoint(
                 log("CALL_PHONE not granted")
                 leg.failPlacement(HangupCause.INTERNAL_ERROR)
             }
-            else -> main.post { place(leg, digits) }
+            else -> main.post { place(leg, digits, caller.sim) }
         }
         return leg
     }
 
-    private fun place(leg: CellularLeg, digits: String) {
+    private fun place(leg: CellularLeg, digits: String, sim: Int? = null) {
         if (leg.stopping) return
         if (closed) { leg.failPlacement(HangupCause.UNAVAILABLE); return }
         if (!status.ready) { leg.failPlacement(HangupCause.UNAVAILABLE); return }
@@ -145,7 +145,12 @@ class CellularEndpoint(
         pending += p
         reportCalls()
         try {
-            telecom.placeCall(Uri.fromParts("tel", digits, null), Bundle())
+            val extras = Bundle()
+            sim?.let { s -> runCatching { simResolver?.handleFor(s) }.getOrNull() }?.let {
+                extras.putParcelable(android.telecom.TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it)
+                log("placing on SIM $sim")
+            }
+            telecom.placeCall(Uri.fromParts("tel", digits, null), extras)
             log("placeCall ${redactNumber(digits)} (leg ${leg.id})")
         } catch (e: SecurityException) {
             pending -= p
@@ -170,6 +175,13 @@ class CellularEndpoint(
     }
 
     // ------------------------------------------------------------ InCallService callbacks (main thread)
+
+    /** Dual SIM: maps calling accounts to 1-based SIM slots and back (set by the app). */
+    interface SimResolver {
+        fun slotOf(handle: android.telecom.PhoneAccountHandle?): Int?
+        fun handleFor(slot: Int): android.telecom.PhoneAccountHandle?
+    }
+    @Volatile var simResolver: SimResolver? = null
 
     /** Optional number -> contact name lookup (set by the app; needs READ_CONTACTS). */
     @Volatile var contactResolver: ((String) -> String?)? = null
@@ -209,7 +221,8 @@ class CellularEndpoint(
                 }
                 val shownName = details.callerDisplayName?.takeIf { it.isNotBlank() }
                     ?: number.takeIf { it.isNotEmpty() }?.let { n -> runCatching { contactResolver?.invoke(n) }.getOrNull() }
-                val leg = CellularLeg("c${ids.getAndIncrement()}", LegDirection.INBOUND, Party(number.ifEmpty { null }, shownName), null, this, main)
+                val sim = runCatching { simResolver?.slotOf(details.accountHandle) }.getOrNull()
+                val leg = CellularLeg("c${ids.getAndIncrement()}", LegDirection.INBOUND, Party(number.ifEmpty { null }, shownName, sim), null, this, main)
                 legs[call] = leg
                 leg.bind(call)
                 log("incoming cellular call ${redactNumber(number)} -> gateway (leg ${leg.id})")

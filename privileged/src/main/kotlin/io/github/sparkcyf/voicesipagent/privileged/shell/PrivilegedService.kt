@@ -271,6 +271,12 @@ class PrivilegedService(context: Context) : IPrivilegedService.Stub() {
         return PowerProfile.apply(on, packageName, savedState)
     }
 
+    override fun remoteAction(action: String, arg: String): String {
+        enforceCaller()
+        return runCatching { RemoteActions.run(shellCtx, appPackage, action, arg) }
+            .getOrElse { Log.w(TAG, "remote action $action failed", it); "error: ${it.message}" }
+    }
+
     companion object {
         private const val TAG = "VsaPrivileged"
         private val PHONE_RUNTIME_PERMISSIONS = listOf(

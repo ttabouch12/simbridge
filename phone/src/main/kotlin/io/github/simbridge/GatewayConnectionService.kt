@@ -57,7 +57,7 @@ class GatewayConnectionService : ConnectionService() {
             return Connection.createFailedConnection(DisconnectCause(DisconnectCause.ERROR, "SIM phone not connected",
                 "Your SIM phone isn't reachable. Check Wi-Fi or the SIM phone's hotspot.", "gateway offline"))
         }
-        val leg = ua.dial(number, Party(null))
+        val leg = ua.dial(number, Party(null, sim = Telecom.simOf(account).takeIf { it > 0 }))
         core.legs[leg.id] = leg
         val c = GatewayConnection(core, leg, incoming = false)
         c.setAddress(request.address, TelecomManager.PRESENTATION_ALLOWED)
@@ -76,6 +76,27 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
     private val audio = CallAudio()
     private var ringback: ToneGenerator? = null
     @Volatile private var done = false
+    @Volatile private var recorder: CallRecorder? = null
+    private val label: String get() = leg.remote.number?.takeIf { it.isNotBlank() } ?: leg.target ?: ""
+    val isRecording get() = recorder != null
+
+    /** Starts recording both sides to Recordings/SimBridge (Record button or auto-record). */
+    @Synchronized fun startRecording() {
+        if (recorder != null || done || leg.state != LegState.CONNECTED) return
+        val rate = leg.media?.format?.sampleRate ?: 8000
+        recorder = CallRecorder(core.context, rate, label).also { audio.recorder = it }
+        core.notifier.inCall(label, recording = true)
+        Log.i("recording started (${rate}Hz)")
+    }
+
+    @Synchronized fun stopRecording() {
+        val r = recorder ?: return
+        recorder = null
+        audio.recorder = null
+        if (!done) core.notifier.inCall(label, recording = false)
+        val who = label
+        Thread { r.stop()?.let { core.notifier.recordingSaved(who, it) } }.start()
+    }
 
     init {
         connectionCapabilities = CAPABILITY_MUTE
@@ -91,7 +112,14 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
                         stopRingback()
                         setActive()
                         core.onCallActive()
-                        leg.media?.let(audio::start)
+                        // Take the microphone first (if the service started without it), then open audio.
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            LinkService.onCallActive()
+                            leg.media?.let(audio::start)
+                            ActiveCall.current = this@GatewayConnection
+                            core.notifier.inCall(label, recording = false)
+                            if (core.prefs.autoRecord) startRecording()
+                        }
                     }
                     LegState.ENDED -> remoteEnded(leg.endCause)
                     else -> Unit
@@ -129,6 +157,7 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
             HangupCause.NORMAL, null -> DisconnectCause(DisconnectCause.REMOTE)
             HangupCause.BUSY -> DisconnectCause(DisconnectCause.BUSY)
             HangupCause.CANCELLED -> DisconnectCause(if (incoming) DisconnectCause.MISSED else DisconnectCause.CANCELED)
+            HangupCause.ANSWERED_ELSEWHERE -> DisconnectCause(DisconnectCause.ANSWERED_ELSEWHERE)
             HangupCause.NO_ANSWER -> DisconnectCause(if (incoming) DisconnectCause.MISSED else DisconnectCause.REMOTE)
             HangupCause.REJECTED -> DisconnectCause(DisconnectCause.REMOTE)
             else -> DisconnectCause(DisconnectCause.ERROR, "Call failed", "The SIM phone couldn't complete the call", cause.name)
@@ -137,6 +166,8 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
     }
 
     private fun finish(dc: DisconnectCause) {
+        stopRecording()
+        if (ActiveCall.current === this) { ActiveCall.current = null; core.notifier.cancelInCall() }
         stopRingback()
         Thread { audio.stop() }.start()
         core.legs.remove(leg.id)
@@ -153,5 +184,25 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
     @Synchronized private fun stopRingback() {
         ringback?.let { runCatching { it.stopTone(); it.release() } }
         ringback = null
+    }
+}
+
+/** The call in progress, for the Record / Stop buttons in the notification. */
+object ActiveCall {
+    @Volatile var current: GatewayConnection? = null
+}
+
+class RecordReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+        val c = ActiveCall.current ?: return
+        when (intent.action) {
+            START -> c.startRecording()
+            STOP -> c.stopRecording()
+        }
+    }
+
+    companion object {
+        const val START = "io.github.simbridge.REC_START"
+        const val STOP = "io.github.simbridge.REC_STOP"
     }
 }

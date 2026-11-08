@@ -191,7 +191,7 @@ private fun ConversationRow(r: ConvRow, modifier: Modifier) {
                 m.status == Msg.FAILED -> "Not sent: "
                 else -> "You: "
             }
-            Text(prefix + m.body, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            Text(prefix + m.body.ifBlank { if (m.att.isNotBlank()) "📷 Photo" else "" }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Normal,
                 color = when {
                     m.outgoing && m.status == Msg.FAILED -> MaterialTheme.colorScheme.error

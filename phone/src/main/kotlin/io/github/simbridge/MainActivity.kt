@@ -30,6 +30,9 @@ sealed interface Screen {
     data class Chat(val key: String, val address: String, val draft: String = "") : Screen
     data object NewChat : Screen
     data object Settings : Screen
+    data object SimPhone : Screen
+    data object Blocked : Screen
+    data object Recordings : Screen
 }
 
 class MainActivity : ComponentActivity() {
@@ -54,7 +57,7 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
                     val s by screen
                     BackHandler(enabled = s != Screen.List) {
-                        screen.value = Screen.List
+                        screen.value = if (s == Screen.SimPhone || s == Screen.Blocked || s == Screen.Recordings) Screen.Settings else Screen.List
                     }
                     io.github.simbridge.ui.ConfirmPairing(core, pendingPair.value) { pendingPair.value = null }
                     AnimatedContent(s, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "nav") { cur ->
@@ -65,7 +68,12 @@ class MainActivity : ComponentActivity() {
                                 onSettings = { screen.value = Screen.Settings })
                             is Screen.Chat -> ChatScreen(core, cur.key, cur.address, cur.draft) { screen.value = Screen.List }
                             Screen.NewChat -> NewChatScreen(core, { screen.value = Screen.List }) { k, a -> screen.value = Screen.Chat(k, a) }
-                            Screen.Settings -> SettingsScreen(core) { screen.value = Screen.List }
+                            Screen.Settings -> SettingsScreen(core, onSimPhone = { screen.value = Screen.SimPhone },
+                                onBlocked = { screen.value = Screen.Blocked },
+                                onRecordings = { screen.value = Screen.Recordings }) { screen.value = Screen.List }
+                            Screen.Recordings -> io.github.simbridge.ui.RecordingsScreen { screen.value = Screen.Settings }
+                            Screen.SimPhone -> io.github.simbridge.ui.SimPhoneScreen(core) { screen.value = Screen.Settings }
+                            Screen.Blocked -> io.github.simbridge.ui.BlockedScreen(core) { screen.value = Screen.Settings }
                         }
                     }
                 }
@@ -106,7 +114,7 @@ class MainActivity : ComponentActivity() {
         val wanted = listOf(
             Manifest.permission.RECORD_AUDIO, Manifest.permission.READ_CONTACTS, Manifest.permission.POST_NOTIFICATIONS,
             Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE, Manifest.permission.NEARBY_WIFI_DEVICES,
-            "android.permission.ACCESS_LOCAL_NETWORK",
+            "android.permission.ACCESS_LOCAL_NETWORK", Manifest.permission.READ_CALL_LOG, Manifest.permission.WRITE_CALL_LOG,
         ).filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (wanted.isNotEmpty()) permissions.launch(wanted.toTypedArray())
     }

@@ -15,6 +15,7 @@ import io.github.sparkcyf.voicesipagent.sip.SrtpMode
 import io.github.sparkcyf.voicesipagent.sip.media.AudioCodec
 import io.github.sparkcyf.voicesipagent.sip.TlsPinning
 import io.github.sparkcyf.voicesipagent.sip.TlsSettings
+import io.github.sparkcyf.voicesipagent.sip.TextMeta
 import io.github.sparkcyf.voicesipagent.voice.CallLeg
 import io.github.sparkcyf.voicesipagent.voice.HangupCause
 import kotlinx.coroutines.CompletableDeferred
@@ -44,6 +45,7 @@ class LinkCore(val context: Context) {
     val store = MessageStore(context)
     val contacts = Contacts(context)
     val notifier = Notifier(context, this)
+    val control = PhoneControl(this)
 
     private val _status = MutableStateFlow(LinkStatus(LinkState.SEARCHING))
     val status: StateFlow<LinkStatus> = _status
@@ -148,6 +150,7 @@ class LinkCore(val context: Context) {
                 if (awaitReady(u, 7_000)) {
                     ua = u
                     prefs.lastHost = c.host
+                    control.onConnected()
                     Log.i("connected to SIM phone at ${c.host}:${c.port} (${c.via})")
                     publishConnected(u, c.host == gw)
                     break
@@ -175,7 +178,8 @@ class LinkCore(val context: Context) {
         if (u.status.ready) return true
         val d = CompletableDeferred<Boolean>()
         val l = io.github.sparkcyf.voicesipagent.voice.EndpointStatusListener { _, st ->
-            if (st.ready) d.complete(true) else if (st.detail.startsWith("registration failed")) d.complete(false)
+            if (st.ready) d.complete(true)
+            else if (st.detail.startsWith("registration failed") || st.detail == "unreachable") d.complete(false)
         }
         u.addStatusListener(l)
         if (u.status.ready) d.complete(true)
@@ -204,7 +208,8 @@ class LinkCore(val context: Context) {
         sipLog,
     ).apply {
         setIncomingCallHandler { leg -> onIncomingCall(leg) }
-        incomingMessageHandler = { number, name, text -> onIncomingText(number, name, text); true }
+        incomingMessageHandler = { number, name, text, meta -> onIncomingText(number, name, text, meta.sim ?: 0); true }
+        controlHandler = { control.handle(it) }
         addStatusListener { _, _ -> kick() }
         start()
     }
@@ -249,7 +254,10 @@ class LinkCore(val context: Context) {
             putParcelable(TelecomManager.EXTRA_INCOMING_CALL_ADDRESS, Uri.fromParts("tel", number, null))
             putBundle(TelecomManager.EXTRA_INCOMING_CALL_EXTRAS, inner)
         }
-        runCatching { tm.addNewIncomingCall(Telecom.handle(context), extras) }.onFailure {
+        // Ring on that SIM's account when it's enabled, otherwise on the plain SimBridge account.
+        val simHandle = Telecom.handle(context, leg.remote.sim)
+        val target = if (leg.remote.sim != null && Telecom.isEnabled(context, simHandle)) simHandle else Telecom.handle(context)
+        runCatching { tm.addNewIncomingCall(target, extras) }.onFailure {
             Log.w("telecom: can't ring (is the SIM phone calling account turned on?)", it)
             legs.remove(leg.id)
             leg.hangup(HangupCause.UNAVAILABLE)
@@ -271,14 +279,15 @@ class LinkCore(val context: Context) {
     }
 
     /** Also used by adb tests (ControlReceiver op "test-in"). */
-    fun onIncomingText(number: String?, name: String?, text: String) {
+    fun onIncomingText(number: String?, name: String?, text: String, sim: Int = 0) {
+        if (number != "gateway" && prefs.isBlocked(number)) { Log.i("text from a blocked number dropped"); return }
         val address = when {
             number.isNullOrBlank() || number == "sms" -> name ?: "Unknown"
             number == "gateway" -> "SimBridge Gateway"
             else -> number
         }
         val time = System.currentTimeMillis()
-        val id = store.add(address, text, outgoing = false, status = Msg.RECEIVED, time = time)
+        val id = store.add(address, text, outgoing = false, status = Msg.RECEIVED, time = time, sim = sim)
         if (number != "gateway") mirror(id, address, text, time, outgoing = false)
         notifier.showMessages(MessageStore.keyOf(address), address)
     }
@@ -288,8 +297,36 @@ class LinkCore(val context: Context) {
         SystemSms.insert(context, address, text, time, outgoing)?.let { store.setSystemId(id, it) }
     }
 
+    /** A picture or group message relayed by the SIM phone. */
+    fun onIncomingMms(o: org.json.JSONObject) {
+        val from = o.optString("from").ifBlank { null }
+        if (prefs.isBlocked(from)) { Log.i("picture message from a blocked number dropped"); return }
+        val people = o.optJSONArray("participants")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
+        val address = if (people.size > 1) Group.address(people) else people.firstOrNull() ?: from ?: "Unknown"
+        val files = Mms.saveIncoming(context, o.optJSONArray("parts"))
+        val text = listOfNotNull(o.optString("subject").ifBlank { null }, o.optString("text").ifBlank { null }).joinToString("\n")
+        val id = store.add(address, text, outgoing = false, status = Msg.RECEIVED, time = o.optLong("at", System.currentTimeMillis()),
+            sim = o.optInt("sim", 0), att = MmsInfo(if (Group.isGroup(address)) from else null, files).toJson())
+        Log.i("picture message: ${files.size} file(s)${if (Group.isGroup(address)) ", group" else ""} (#$id)")
+        notifier.showMessages(MessageStore.keyOf(address), address)
+    }
+
+    /** Sends a picture and/or group message through the SIM phone (MMS). */
+    fun sendMms(address: String, text: String, files: List<Attachment>, sim: Int = simFor(address)): Long {
+        val id = store.add(address, text, outgoing = true, status = Msg.SENDING, sim = sim, att = MmsInfo(null, files).toJson())
+        deliverMms(id, address, text, files, sim)
+        return id
+    }
+
+    private fun deliverMms(id: Long, address: String, text: String, files: List<Attachment>, sim: Int) {
+        val to = if (Group.isGroup(address)) Group.members(address) else listOf(address)
+        val ok = control.sendMms(to, text, Mms.partsJson(context, files), "m$id", sim)
+        if (!ok) { store.setStatus(id, Msg.FAILED); kick() }
+    }
+
     /** Deletes a conversation here and its copies in the system Messages app. */
     fun deleteConversation(key: String) {
+        store.attachmentsIn(key).forEach { Mms.deleteFiles(context, it) }
         SystemSms.delete(context, store.deleteConversation(key))
     }
 
@@ -299,23 +336,36 @@ class LinkCore(val context: Context) {
     }
 
     /** Sends a text through the SIM phone. Returns the new message id. */
-    fun sendText(address: String, text: String): Long {
-        val id = store.add(address, text, outgoing = true, status = Msg.SENDING)
-        deliver(id, address, text)
+    /** SIM to send a text on: the line the conversation last came in on, else the chosen default. */
+    fun simFor(address: String): Int {
+        if ((control.status.value?.sims?.size ?: 0) < 2) return 0
+        return store.thread(MessageStore.keyOf(address)).lastOrNull { !it.outgoing && it.sim > 0 }?.sim ?: prefs.outgoingSim
+    }
+
+    fun sendText(address: String, text: String, sim: Int = simFor(address)): Long {
+        if (Group.isGroup(address)) return sendMms(address, text, emptyList(), sim)   // group texts are MMS
+        val id = store.add(address, text, outgoing = true, status = Msg.SENDING, sim = sim)
+        deliver(id, address, text, sim)
         return id
     }
 
     fun retry(msg: Msg) {
         store.setStatus(msg.id, Msg.SENDING)
-        deliver(msg.id, msg.address, msg.body)
+        val files = MmsInfo.parse(msg.att)?.files.orEmpty()
+        if (files.isNotEmpty() || Group.isGroup(msg.address)) deliverMms(msg.id, msg.address, msg.body, files, msg.sim)
+        else deliver(msg.id, msg.address, msg.body, msg.sim)
     }
 
-    private fun deliver(id: Long, address: String, text: String) {
+    /** Block rules changed in the UI. */
+    fun blockRulesChanged() = control.pushBlockRules()
+
+    private fun deliver(id: Long, address: String, text: String, sim: Int) {
         val u = ua
         if (u == null || !u.status.ready) { store.setStatus(id, Msg.FAILED); kick(); return }
-        u.sendMessageTo(address, text) { code ->
+        // The ref brings back "sent" and "delivered" reports for this message.
+        u.sendMessageTo(address, text, TextMeta(ref = "m$id", sim = sim.takeIf { it > 0 })) { code ->
             val ok = code != null && code in 200..299
-            store.setStatus(id, if (ok) Msg.SENT else Msg.FAILED)
+            if (ok) store.advanceStatus(id, Msg.SENT) else store.setStatus(id, Msg.FAILED)
             if (ok) mirror(id, address, text, System.currentTimeMillis(), outgoing = true)
             if (code == null || code !in 200..299) Log.w("text not accepted by the SIM phone (${code ?: "timeout"})")
         }

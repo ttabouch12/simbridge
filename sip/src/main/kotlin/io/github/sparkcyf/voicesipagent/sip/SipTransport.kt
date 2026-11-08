@@ -100,24 +100,33 @@ internal class UdpSipTransport(
  */
 internal class SipStreamReader(input: InputStream) {
     private val inp = BufferedInputStream(input, 16 * 1024)
+    private var crlfs = 0
+    private var lastCrlfMs = 0L
 
     /** Next message's bytes, or null at end of stream. Keep-alive CRLFs are skipped (reported via [onKeepAlive]). */
     fun next(onKeepAlive: (pingWithDoubleCrlf: Boolean) -> Unit): ByteArray? {
-        // Skip CRLF keep-alives.
-        var crlfs = 0
+        // Skip CRLF keep-alives, reporting each one as soon as it is complete: a ping is
+        // "\r\n\r\n" (answered with a pong), a pong is a lone "\r\n". Nothing else may follow
+        // for minutes, so we must not wait for the next message before reacting.
         var b: Int
         while (true) {
             inp.mark(1)
             b = inp.read()
             if (b < 0) return null
-            if (b == '\r'.code || b == '\n'.code) {
-                if (b == '\n'.code) crlfs++
+            if (b == '\r'.code) continue
+            if (b == '\n'.code) {
+                val now = System.currentTimeMillis()
+                if (now - lastCrlfMs > 1000) crlfs = 0   // parts of one ping arrive together
+                lastCrlfMs = now
+                crlfs++
+                if (crlfs >= 2) { crlfs = 0; onKeepAlive(true) }
+                else if (inp.available() == 0) onKeepAlive(false)
                 continue
             }
             inp.reset()
             break
         }
-        if (crlfs > 0) onKeepAlive(crlfs >= 2)
+        crlfs = 0
         val head = ByteArrayOutputStream(1024)
         var state = 0   // matches \r\n\r\n
         while (state < 4) {
@@ -147,7 +156,8 @@ internal class SipStreamReader(input: InputStream) {
 
     companion object {
         const val MAX_HEADER = 32 * 1024
-        const val MAX_BODY = 64 * 1024
+        /** Picture messages travel as control messages over TLS: allow a few MB. */
+        const val MAX_BODY = 4 * 1024 * 1024
     }
 }
 
@@ -320,6 +330,8 @@ internal class TlsClientTransport(
     private val log: SipLog,
     private val onMessage: (SipMessage, InetSocketAddress) -> Unit,
     private val onDisconnected: () -> Unit,
+    /** The server refused or didn't answer the TCP/TLS connect. */
+    private val onConnectFailed: () -> Unit = {},
 ) : SipTransport {
     @Volatile private var conn: SipConnection? = null
     @Volatile private var closed = false
@@ -349,6 +361,7 @@ internal class TlsClientTransport(
             }).also { conn = it; it.start() }
         } catch (e: Exception) {
             log.warn("TLS connect to $server failed: ${e.message}")
+            if (!closed) onConnectFailed()
             null
         }
     }

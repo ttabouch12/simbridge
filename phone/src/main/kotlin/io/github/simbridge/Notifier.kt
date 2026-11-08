@@ -25,6 +25,16 @@ class Notifier(private val context: Context, private val core: LinkCore) {
             setShowBadge(false)
         })
         nm.createNotificationChannel(NotificationChannel(CH_ALERTS, "Problems", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel(CH_CALL, "Call recording", NotificationManager.IMPORTANCE_LOW).apply {
+            description = "Record button during calls and saved recordings"
+        })
+        nm.createNotificationChannel(NotificationChannel(CH_MISSED, "Missed calls", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Calls the SIM phone got while this phone was offline"
+        })
+        nm.createNotificationChannel(NotificationChannel(CH_MIC, "Call microphone", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Shown when Android has kept the microphone from SimBridge"
+            setSound(null, null)
+        })
     }
 
     fun statusNotification(s: LinkStatus): Notification {
@@ -34,11 +44,12 @@ class Notifier(private val context: Context, private val core: LinkCore) {
             LinkState.NO_WIFI -> "SIM phone not reachable" to s.detail
             LinkState.NEEDS_PASSWORD -> "SimBridge needs setup" to s.detail
         }
+        val needsMic = !LinkService.micReady && s.state == LinkState.CONNECTED
         return Notification.Builder(context, CH_STATUS)
             .setSmallIcon(R.drawable.ic_link)
-            .setContentTitle(title).setContentText(text)
+            .setContentTitle(title).setContentText(if (needsMic) "Tap once to allow call audio" else text)
             .setOngoing(true).setShowWhen(false)
-            .setContentIntent(openApp(null, 0))
+            .setContentIntent(if (needsMic) micIntent() else openApp(null, 0))
             .build()
     }
 
@@ -52,7 +63,17 @@ class Notifier(private val context: Context, private val core: LinkCore) {
         val sender = Person.Builder().setName(name).setIcon(icon).setKey(key).build()
         val me = Person.Builder().setName("You").build()
         val style = Notification.MessagingStyle(me)
-        unread.forEach { style.addMessage(Notification.MessagingStyle.Message(it.body, it.time, sender)) }
+        val group = Group.isGroup(address)
+        if (group) { style.conversationTitle = name; style.isGroupConversation = true }
+        unread.forEach { m ->
+            val info = MmsInfo.parse(m.att)
+            val who = if (group) info?.from?.let { f ->
+                val n = core.contacts.lookup(f)?.name ?: f
+                Person.Builder().setName(n).setKey(MessageStore.keyOf(f)).setIcon(Icon.createWithBitmap(letterAvatar(n))).build()
+            } ?: sender else sender
+            val body = m.body.ifBlank { if (info?.files?.any { it.isImage } == true) "📷 Photo" else if (info != null) "📎 Attachment" else "" }
+            style.addMessage(Notification.MessagingStyle.Message(body, m.time, who))
+        }
 
         val reply = Notification.Action.Builder(Icon.createWithResource(context, R.drawable.ic_link), "Reply",
             PendingIntent.getBroadcast(context, key.hashCode(), Intent(context, ReplyReceiver::class.java)
@@ -69,8 +90,20 @@ class Notifier(private val context: Context, private val core: LinkCore) {
             .setSemanticAction(Notification.Action.SEMANTIC_ACTION_MARK_AS_READ)
             .build()
 
+        // A long-lived conversation shortcut puts the notification in Android's Conversations
+        // section and lets Wear OS / Android Auto show it as a chat with the sender's face.
+        runCatching {
+            val open = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).putExtra(MainActivity.EXTRA_KEY, key)
+            context.getSystemService(android.content.pm.ShortcutManager::class.java).pushDynamicShortcut(
+                android.content.pm.ShortcutInfo.Builder(context, "c:$key")
+                    .setShortLabel(name).setLongLived(true).setIcon(icon).setPerson(sender)
+                    .setCategories(setOf("android.shortcut.conversation"))
+                    .setIntent(open).build())
+        }
         val n = Notification.Builder(context, CH_MESSAGES)
             .setSmallIcon(R.drawable.ic_link)
+            .setShortcutId("c:$key")
+            .setLocusId(android.content.LocusId("c:$key"))
             .setStyle(style)
             .setCategory(Notification.CATEGORY_MESSAGE)
             .setColor(0xFF1A73E8.toInt())
@@ -95,6 +128,78 @@ class Notifier(private val context: Context, private val core: LinkCore) {
         runCatching { nm.notify(ID_ALERT, n) }
     }
 
+    /** Android started SimBridge in the background (after a restart or update) without the mic. */
+    fun micBlocked() {
+        val n = Notification.Builder(context, CH_MIC)
+            .setSmallIcon(R.drawable.ic_link)
+            .setContentTitle("Your microphone is off for this call")
+            .setContentText("Tap to turn it on. Needed once after a restart or update.")
+            .setCategory(Notification.CATEGORY_CALL)
+            .setContentIntent(micIntent())
+            .setAutoCancel(true).build()
+        runCatching { nm.notify(ID_MIC, n) }
+    }
+
+    fun micAllowed() = nm.cancel(ID_MIC)
+
+    /** Shown during a SimBridge call: Record / Stop recording. Wear OS and cars show the action too. */
+    fun inCall(who: String, recording: Boolean) {
+        val name = core.contacts.lookup(who)?.name ?: who.ifBlank { "Call" }
+        val action = if (recording) RecordReceiver.STOP else RecordReceiver.START
+        val pi = PendingIntent.getBroadcast(context, 11, Intent(context, RecordReceiver::class.java).setAction(action),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = Notification.Builder(context, CH_CALL)
+            .setSmallIcon(R.drawable.ic_link)
+            .setContentTitle(if (recording) "● Recording call with $name" else "Call with $name via SIM phone")
+            .setContentText(if (recording) "Saved to Recordings/SimBridge when the call ends" else "Tap Record to save this call")
+            .setOngoing(true).setUsesChronometer(true).setShowWhen(true)
+            .setCategory(Notification.CATEGORY_CALL)
+            .addAction(Notification.Action.Builder(null, if (recording) "Stop recording" else "Record", pi).build())
+            .build()
+        runCatching { nm.notify(ID_CALL, n) }
+    }
+
+    fun cancelInCall() = nm.cancel(ID_CALL)
+
+    fun recordingSaved(who: String, uri: android.net.Uri) {
+        val name = core.contacts.lookup(who)?.name ?: who.ifBlank { "call" }
+        val open = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "audio/mp4")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        val n = Notification.Builder(context, CH_CALL)
+            .setSmallIcon(R.drawable.ic_link)
+            .setContentTitle("Call recording saved")
+            .setContentText("With $name · Recordings/SimBridge")
+            .setContentIntent(PendingIntent.getActivity(context, uri.hashCode(), open, PendingIntent.FLAG_IMMUTABLE))
+            .setAutoCancel(true).build()
+        runCatching { nm.notify(uri.hashCode(), n) }
+    }
+
+    /** A call the SIM phone got while this phone was unreachable. */
+    fun missedCall(number: String, name: String?, at: Long, sim: Int) {
+        val who = name ?: number.ifBlank { "Unknown caller" }
+        val call = Intent(Intent.ACTION_DIAL, android.net.Uri.fromParts("tel", number, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val b = Notification.Builder(context, CH_MISSED)
+            .setSmallIcon(android.R.drawable.stat_notify_missed_call)
+            .setContentTitle("Missed call")
+            .setContentText("$who${if (sim > 0) " · SIM $sim" else ""} · while this phone was offline")
+            .setWhen(at).setShowWhen(true)
+            .setCategory(Notification.CATEGORY_MISSED_CALL)
+            .setAutoCancel(true)
+        if (number.isNotBlank()) {
+            b.setContentIntent(PendingIntent.getActivity(context, number.hashCode(), call, PendingIntent.FLAG_IMMUTABLE))
+            b.addAction(Notification.Action.Builder(null, "Call back",
+                PendingIntent.getActivity(context, number.hashCode() + 1, call, PendingIntent.FLAG_IMMUTABLE)).build())
+            b.addAction(Notification.Action.Builder(null, "Message",
+                PendingIntent.getActivity(context, number.hashCode() + 2, Intent(context, MainActivity::class.java)
+                    .setAction(Intent.ACTION_SENDTO).setData(android.net.Uri.fromParts("smsto", number, null))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)).build())
+        }
+        runCatching { nm.notify("missed:$at".hashCode(), b.build()) }
+    }
+
+    private fun micIntent(): PendingIntent = PendingIntent.getActivity(context, 9,
+        Intent(context, MicActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
+
     private fun openApp(key: String?, req: Int): PendingIntent = PendingIntent.getActivity(context, req,
         Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             .apply { key?.let { putExtra(MainActivity.EXTRA_KEY, it) } },
@@ -104,8 +209,13 @@ class Notifier(private val context: Context, private val core: LinkCore) {
         const val CH_MESSAGES = "messages"
         const val CH_STATUS = "status"
         const val CH_ALERTS = "alerts"
+        const val CH_MIC = "mic"
+        const val CH_MISSED = "missed"
+        const val CH_CALL = "call"
         const val ID_STATUS = 1
         const val ID_ALERT = 2
+        const val ID_MIC = 3
+        const val ID_CALL = 4
 
         val AVATAR_COLORS = intArrayOf(0xFF1A73E8.toInt(), 0xFFD93025.toInt(), 0xFF188038.toInt(), 0xFFE37400.toInt(),
             0xFF9334E6.toInt(), 0xFF007B83.toInt(), 0xFFC5221F.toInt(), 0xFF1967D2.toInt())

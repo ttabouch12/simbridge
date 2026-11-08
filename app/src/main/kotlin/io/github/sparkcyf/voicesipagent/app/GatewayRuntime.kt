@@ -29,6 +29,7 @@ import io.github.sparkcyf.voicesipagent.sip.SipUserAgent
 import io.github.sparkcyf.voicesipagent.sip.TlsSettings
 import io.github.sparkcyf.voicesipagent.sip.LanSourceFilter
 import io.github.sparkcyf.voicesipagent.sip.SrtpMode
+import io.github.sparkcyf.voicesipagent.sip.TextMeta
 import io.github.sparkcyf.voicesipagent.sip.media.AudioCodec
 import io.github.sparkcyf.voicesipagent.telephony.CellularEndpoint
 import io.github.sparkcyf.voicesipagent.telephony.CallSnapshot
@@ -137,6 +138,8 @@ class GatewayRuntime private constructor(context: Context) {
     )
     /** Built-in SIP user agent. */
     private var sip: CallEndpoint? = null
+    internal val sipAgent: SipUserAgent? get() = sip as? SipUserAgent
+    val control by lazy { GatewayControl(app, this) }
 
     // ---- companion features: status alerts, power profile, battery
     val alerts = GatewayAlerts { text -> (sip as? SipUserAgent)?.sendMessage("gateway", text, "SimBridge Gateway") == true }
@@ -204,6 +207,21 @@ class GatewayRuntime private constructor(context: Context) {
         }
         AppLog.i("runtime starting ($settings)")
         cellular.contactResolver = { n -> ContactNames.lookup(app, n) }
+        cellular.simResolver = object : io.github.sparkcyf.voicesipagent.telephony.CellularEndpoint.SimResolver {
+            @android.annotation.SuppressLint("MissingPermission")
+            override fun slotOf(handle: android.telecom.PhoneAccountHandle?): Int? {
+                if (handle == null || !Sims.dual(app)) return null
+                val sub = runCatching { app.getSystemService(android.telephony.TelephonyManager::class.java).getSubscriptionId(handle) }.getOrNull() ?: return null
+                return Sims.slotForSubId(app, sub)
+            }
+            @android.annotation.SuppressLint("MissingPermission")
+            override fun handleFor(slot: Int): android.telecom.PhoneAccountHandle? {
+                val sub = Sims.subIdForSlot(app, slot) ?: return null
+                val tm = app.getSystemService(android.telephony.TelephonyManager::class.java)
+                return runCatching { app.getSystemService(android.telecom.TelecomManager::class.java).callCapablePhoneAccounts }
+                    .getOrDefault(emptyList()).firstOrNull { h -> runCatching { tm.getSubscriptionId(h) }.getOrNull() == sub }
+            }
+        }
         if (SystemClock.elapsedRealtime() < 15 * 60_000L) {
             alerts.post("🔄 The SIM phone restarted and SimBridge Gateway is running again.")
         }
@@ -543,7 +561,7 @@ class GatewayRuntime private constructor(context: Context) {
     private fun sipStatus(endpoint: CallEndpoint, status: EndpointStatus) = worker.execute {
         if (sip !== endpoint) return@execute
         _health.update { it.copy(sip = status) }
-        if (status.ready) alerts.flush()
+        if (status.ready) { alerts.flush(); control.flush() }
         updateReadiness()
     }
 
@@ -602,7 +620,8 @@ class GatewayRuntime private constructor(context: Context) {
                 sipLog,
             ).also { ua ->
                 ua.addStatusListener { ep, st -> sipStatus(ep, st) }
-                ua.outgoingMessageHandler = { to, text -> sendSmsFromPhone(to, text) }
+                ua.outgoingMessageHandler = { to, text, meta -> sendSmsFromPhone(to, text, meta) }
+                ua.controlHandler = { control.handle(it) }
                 ua.start()
             }
             if (s.serverMode) (ep as SipUserAgent).let { ua ->
@@ -684,7 +703,12 @@ class GatewayRuntime private constructor(context: Context) {
         val b = CallBridge(
             sideA = cellular,
             sideB = sideB,
-            routeAtoB = { inboundTarget },
+            routeAtoB = { leg ->
+                if (control.isBlocked(leg.remote.number)) {
+                    control.callEvent("blocked", leg.remote.number, leg.remote.sim)
+                    null
+                } else inboundTarget
+            },
             routeBtoA = { leg -> leg.target?.takeIf { it != s.username } },
             config = GatewayConfig(
                 cellularInboundTarget = inboundTarget,
@@ -695,6 +719,7 @@ class GatewayRuntime private constructor(context: Context) {
             log = { AppLog.i("bridge: $it") },
         )
         b.addListener { session ->
+            noteMissed(session)
             val description = describe(session)
             worker.execute {
                 if (bridge !== b) return@execute
@@ -706,6 +731,20 @@ class GatewayRuntime private constructor(context: Context) {
         bridge = b
         b.start()
         AppLog.i("bridge ready: cellular <-> ${sideB.name}")
+    }
+
+    /** Sessions whose call reached the main phone (it rang there); the rest are reported as missed. */
+    private val reachedPhone = java.util.Collections.synchronizedSet(HashSet<Int>())
+
+    private fun noteMissed(s: BridgeSession) {
+        if (s.origin != cellular.name) return
+        val st = s.outbound?.state
+        if (st == LegState.RINGING || st == LegState.CONNECTED || s.connectedAtMs != null) reachedPhone += s.id
+        if (s.endedAtMs == null) return
+        val reached = reachedPhone.remove(s.id)
+        // Rejected by a block rule: no outbound leg and already reported.
+        if (s.outbound == null) return
+        if (!reached && s.connectedAtMs == null) control.callEvent("missed", s.inbound.remote.number, s.inbound.remote.sim)
     }
 
     private fun describe(s: BridgeSession): String? {
@@ -824,7 +863,8 @@ class GatewayRuntime private constructor(context: Context) {
             appendLine("shizuku=${h.shizuku} (${h.shizukuDetail})")
             appendLine("privileged=${h.privileged} ${h.privilegedDetail}")
             appendLine("sip=${h.sip.detail} ready=${h.sip.ready} stack=builtin " +
-                "transport=${settings.sipTransport} srtp=${settings.srtp} debugLog=${settings.sipDebugLog}")
+                "tls=${pairing.tlsPort} legacyUdp=${pairing.legacyUdp} srtp=${if (pairing.legacyUdp) "optional" else "required"} " +
+                "hd=${pairing.hdVoice} debugLog=${settings.sipDebugLog}")
             appendLine("cellular=${cellular.status.detail} inCallServiceBound=${CellularEndpoint.isInCallServiceBound} " +
                 "service=${CellularEndpoint.boundServiceDescription ?: "none"}")
             appendLine("sdk=${Build.VERSION.SDK_INT} callAccess=${settings.callAccess} effective=${h.effectiveCallAccess} " +
@@ -837,9 +877,10 @@ class GatewayRuntime private constructor(context: Context) {
     }
 
     /** Forward an incoming cellular SMS to the registered phone (server mode) as a SIP MESSAGE. */
-    fun forwardSms(from: String?, text: String) = worker.execute {
+    fun forwardSms(from: String?, text: String, subId: Int? = null) = worker.execute {
         val s = sip
-        if (s is SipUserAgent && s.sendMessage(from, text, ContactNames.lookup(app, from))) {
+        val sim = if (subId != null && Sims.dual(app)) Sims.slotForSubId(app, subId) else null
+        if (s is SipUserAgent && s.sendMessage(from, text, ContactNames.lookup(app, from), TextMeta(sim = sim))) {
             AppLog.i("SMS forwarded to the registered phone")
         } else {
             AppLog.w("SMS not forwarded: no phone registered")
@@ -847,11 +888,18 @@ class GatewayRuntime private constructor(context: Context) {
     }
 
     /** Main phone -> cellular SMS through this phone's SIM. Failures come back to the main phone as an alert. */
-    private fun sendSmsFromPhone(to: String, text: String): Boolean {
+    private fun sendSmsFromPhone(to: String, text: String, meta: TextMeta): Boolean {
         if (!_health.value.takeover) return false
-        return SmsSender.send(app, to, text) { ok, detail ->
+        val subId = meta.sim?.let { Sims.subIdForSlot(app, it) }
+        val ref = meta.ref
+        return SmsSender.send(app, to, text, subId,
+            onDelivered = ref?.let { r -> { ok: Boolean -> control.smsStatus(r, if (ok) "delivered" else "failed", if (ok) null else "not delivered") } },
+        ) { ok, detail ->
             AppLog.i("SMS to ${io.github.sparkcyf.voicesipagent.voice.redactNumber(to)}: $detail")
-            if (!ok) alerts.post("❌ Your SMS to $to was not sent ($detail).")
+            when {
+                ref != null -> control.smsStatus(ref, if (ok) "sent" else "failed", if (ok) null else detail)
+                !ok -> alerts.post("❌ Your SMS to $to was not sent ($detail).")
+            }
         }
     }
 

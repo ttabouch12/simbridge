@@ -58,10 +58,15 @@ class SipUserAgent(
 
     private val statusListeners = CopyOnWriteArrayList<EndpointStatusListener>()
     @Volatile private var incomingHandler: IncomingCallHandler? = null
-    /** Server mode: out-of-dialog MESSAGE from the registered phone -> (target number, text). Returns true if accepted. */
-    @Volatile var outgoingMessageHandler: ((String, String) -> Boolean)? = null
-    /** Client mode: out-of-dialog MESSAGE from the server -> (from number, display name, text). Returns true if accepted. */
-    @Volatile var incomingMessageHandler: ((String?, String?, String) -> Boolean)? = null
+    /** Server mode: out-of-dialog MESSAGE from the registered phone -> (target number, text, meta). Returns true if accepted. */
+    @Volatile var outgoingMessageHandler: ((String, String, TextMeta) -> Boolean)? = null
+    /** Client mode: out-of-dialog MESSAGE from the server -> (from number, display name, text, meta). Returns true if accepted. */
+    @Volatile var incomingMessageHandler: ((String?, String?, String, TextMeta) -> Boolean)? = null
+    /**
+     * SimBridge control messages (JSON, [CONTROL_TYPE]) in either direction: from the registered
+     * phone in server mode, from the server in client mode. Only reached after authentication.
+     */
+    @Volatile var controlHandler: ((String) -> Unit)? = null
     @Volatile override var status: EndpointStatus = EndpointStatus(false, "stopped")
         private set
 
@@ -89,9 +94,20 @@ class SipUserAgent(
     internal val isServerMode get() = config.serverMode
     private var peerAor: String? = null
     @Volatile private var peerContactUri: String? = null
-    private var peerExpiry: ScheduledFuture<*>? = null
     /** Full SIP URI (sip:user@ip:port) to reach the registered phone, or null if none. */
     internal fun serverPeerUri(): String? = peerContactUri
+    /**
+     * Server mode: every registered phone. SimBridge phones register with a unique user
+     * ("phone-xxxx") and are keyed by it, so a phone that changes address keeps one binding;
+     * other SIP apps are keyed by IP address.
+     */
+    private val bindings = java.util.concurrent.ConcurrentHashMap<String, PhoneBinding>()
+    /** Number of phones registered right now (server mode). */
+    val registeredPhones: Int get() = bindings.size
+    private fun bindingFor(from: InetSocketAddress) =
+        bindings.values.firstOrNull { it.addr == from } ?: bindings.values.firstOrNull { it.addr.address == from.address }
+    private fun bindingKey(contactUser: String, from: InetSocketAddress) =
+        if (contactUser.startsWith("phone-")) contactUser else from.address.hostAddress
     /** Domain to use in locally generated URIs (our LAN IP when no account domain is set). */
     internal val selfDomain: String get() = localDomain
 
@@ -109,14 +125,17 @@ class SipUserAgent(
             executor.scheduleWithFixedDelay({ (transport as? ServerTransport)?.reapIdle(15 * 60_000L) }, 60, 60, TimeUnit.SECONDS)
         } else if (config.tls != null) {
             resolve()
-            transport = TlsClientTransport(serverAddr, config.tls.sslContext, log, handler) {
-                post {
-                    if (stopping || !started) return@post
-                    setStatus(false, "connection lost")
-                    regRefresh?.cancel(false)
-                    regRefresh = schedule(2000) { register() }
-                }
-            }
+            transport = TlsClientTransport(serverAddr, config.tls.sslContext, log, handler,
+                onDisconnected = {
+                    post {
+                        if (stopping || !started) return@post
+                        setStatus(false, "connection lost")
+                        regRefresh?.cancel(false)
+                        regRefresh = schedule(2000) { register() }
+                    }
+                },
+                onConnectFailed = { post { if (!stopping && started && !status.ready) setStatus(false, "unreachable") } },
+            )
             val ka = config.keepAliveSec.toLong().coerceAtLeast(15)
             executor.scheduleWithFixedDelay({ (transport as? TlsClientTransport)?.keepAlive(20_000) }, ka, ka, TimeUnit.SECONDS)
         } else {
@@ -144,7 +163,8 @@ class SipUserAgent(
             stopping = true
             calls.values.toList().forEach { it.hangup(HangupCause.NORMAL) }
             regRefresh?.cancel(false)
-            peerExpiry?.cancel(false)
+            bindings.values.forEach { it.expiry?.cancel(false) }
+            bindings.clear()
             if (config.serverMode) done.countDown() else sendRegister(0, null) { done.countDown() }
         }
         done.await(timeoutMs, TimeUnit.MILLISECONDS)
@@ -177,7 +197,19 @@ class SipUserAgent(
     }
 
     override fun dial(target: String, caller: Party): CallLeg {
-        val call = SipCall(this, LegDirection.OUTBOUND, Party(target), target, newCallId(), newTag())
+        val phones = if (config.serverMode) bindings.values.sortedByDescending { it.since } else emptyList()
+        if (phones.size > 1) {
+            // Several main phones: ring them all, first to answer gets the call (forking, RFC 3261 §16).
+            val fork = ForkedCall(newCallId().take(8), Party(target), target)
+            phones.forEach { b ->
+                val child = SipCall(this, LegDirection.OUTBOUND, Party(target), target, newCallId(), newTag(), b)
+                fork.add(child)
+                post { child.startOutbound(target, caller) }
+            }
+            log.info("ringing ${phones.size} phones")
+            return fork
+        }
+        val call = SipCall(this, LegDirection.OUTBOUND, Party(target), target, newCallId(), newTag(), phones.firstOrNull())
         post { call.startOutbound(target, caller) }
         return call
     }
@@ -186,18 +218,44 @@ class SipUserAgent(
      * Server mode: deliver an incoming SMS to the registered phone as an out-of-dialog SIP MESSAGE
      * (shown as a chat message in the softphone). Returns false if no phone is currently registered.
      */
-    fun sendMessage(fromNumber: String?, text: String, displayName: String? = null): Boolean {
-        val peer = peerContactUri ?: return false
+    fun sendMessage(fromNumber: String?, text: String, displayName: String? = null, meta: TextMeta = TextMeta()): Boolean {
+        val phones = bindings.values.toList()
+        if (phones.isEmpty()) return false
         post {
             val fromUser = (fromNumber ?: "sms").filter { it.isLetterOrDigit() || it == '+' }.ifEmpty { "sms" }
-            val from = NameAddr(displayName ?: fromNumber, "sip:$fromUser@$localDomain").withTag(newTag())
-            val to = NameAddr(null, peer)
-            val req = newRequest("MESSAGE", peer, from, to, newCallId(), 1)
-            req.headers.add("Content-Type", "text/plain;charset=UTF-8")
-            req.body = text.toByteArray(Charsets.UTF_8)
-            sendClient(req) { /* delivery response ignored; best-effort */ }
-            log.info("SMS from ${redactNumber(fromNumber)} relayed to phone")
+            for (b in phones) {
+                val from = NameAddr(displayName ?: fromNumber, "sip:$fromUser@$localDomain").withTag(newTag())
+                val req = newRequest("MESSAGE", b.contactUri, from, NameAddr(null, b.contactUri), newCallId(), 1)
+                req.headers.add("Content-Type", "text/plain;charset=UTF-8")
+                meta.writeTo(req.headers)
+                req.body = text.toByteArray(Charsets.UTF_8)
+                sendClient(req, b.addr) { /* delivery response ignored; best-effort */ }
+            }
+            log.info("SMS from ${redactNumber(fromNumber)} relayed to ${phones.size} phone(s)")
         }
+        return true
+    }
+
+    /**
+     * Sends a control message ([CONTROL_TYPE] JSON). Server mode: to the registered phone (false
+     * if none). Client mode: to the server, with digest auth. [onResult] gets the final SIP code.
+     */
+    fun sendControl(json: String, onResult: (Int?) -> Unit = {}): Boolean {
+        if (config.serverMode) {
+            val phones = bindings.values.toList()
+            if (phones.isEmpty()) return false
+            post {
+                for (b in phones) {
+                    val from = NameAddr("SimBridge", "sip:gateway@$localDomain").withTag(newTag())
+                    val req = newRequest("MESSAGE", b.contactUri, from, NameAddr(null, b.contactUri), newCallId(), 1)
+                    req.headers.add("Content-Type", CONTROL_TYPE)
+                    req.body = json.toByteArray(Charsets.UTF_8)
+                    sendClient(req, b.addr) { r -> if (r == null || !r.isProvisional) onResult(r?.code) }
+                }
+            }
+            return true
+        }
+        sendOutOfDialog("control", json, CONTROL_TYPE, TextMeta(), onResult)
         return true
     }
 
@@ -339,13 +397,13 @@ class SipUserAgent(
             // source address alone can't use the SIM. A valid answer also re-learns the phone
             // (e.g. right after we restarted, before its next REGISTER).
             if (!requestAuthPassed(req, from, req.method)) return
-            if (!fromRegisteredPhone(from) || serverAddr != from) {
+            if (bindingFor(from)?.addr != from) {
                 val user = req.headers["Contact"]?.let { NameAddr.parse(it) }?.let { SipUri.parse(it.uri)?.user }
                     ?: req.from?.sipUri?.user ?: "phone"
                 learnPeer(req.from?.sipUri?.user, user, from, config.registrarLeaseSec.coerceIn(30, 86_400))
             }
         }
-        if (config.serverMode && req.to?.tag != null && calls[req.callId] != null && !fromRegisteredPhone(from)) {
+        if (config.serverMode && req.to?.tag != null && calls[req.callId]?.let { c -> (c.peerAddr?.address ?: serverAddr.address) != from.address } == true) {
             // In-dialog requests (BYE, re-INVITE, INFO) only from the phone that owns the call.
             log.warn("${req.method} for a call from foreign ${from.address?.hostAddress} rejected")
             transport.send(buildResponse(req, 403), from)
@@ -362,7 +420,7 @@ class SipUserAgent(
                     tx.respond(buildResponse(req, 481))
                 } else {
                     tx.respond(buildResponse(req, 200, toTag = call.localTag))
-                    call.onCancel(inviteTx)
+                    call.onCancel(inviteTx, req)
                 }
             }
             call != null && (toTag != null || req.method == "INVITE") -> call.onInDialogRequest(req, tx)
@@ -382,17 +440,14 @@ class SipUserAgent(
     }
 
     /** Server mode: only the currently registered phone (same IP) may place calls or send SMS. */
-    private fun fromRegisteredPhone(from: InetSocketAddress): Boolean {
-        if (peerContactUri == null) return false
-        val reg = serverAddr?.address ?: return false
-        return reg == from.address
-    }
+    private fun fromRegisteredPhone(from: InetSocketAddress): Boolean = bindingFor(from) != null
 
     /** Phone -> cellular SMS: Request-URI user is the destination number, body is the text. */
     private fun onPhoneMessage(req: SipRequest, tx: ServerTransaction) {
         val target = SipUri.parse(req.uri)?.user ?: req.to?.sipUri?.user
         val text = req.bodyText.trim()
         val ctype = req.headers["Content-Type"]?.lowercase().orEmpty()
+        if (ctype.startsWith(CONTROL_TYPE)) { onControl(req, tx); return }
         if (ctype.isNotEmpty() && !ctype.startsWith("text/plain")) {
             tx.respond(buildResponse(req, 415, toTag = newTag()))
             return
@@ -401,32 +456,45 @@ class SipUserAgent(
             tx.respond(buildResponse(req, 400, toTag = newTag()))
             return
         }
-        val ok = runCatching { outgoingMessageHandler?.invoke(target, text) == true }.getOrDefault(false)
+        val ok = runCatching { outgoingMessageHandler?.invoke(target, text, TextMeta.readFrom(req.headers)) == true }.getOrDefault(false)
         tx.respond(buildResponse(req, if (ok) 202 else 480, toTag = newTag()))
         log.info("SMS from phone to ${redactNumber(target)} ${if (ok) "accepted" else "refused"}")
     }
 
     /** Client mode: a text relayed by the gateway (an incoming SMS or a gateway alert). */
     private fun onServerMessage(req: SipRequest, tx: ServerTransaction) {
+        if (req.headers["Content-Type"]?.lowercase().orEmpty().startsWith(CONTROL_TYPE)) { onControl(req, tx); return }
         val from = req.from
         val text = req.bodyText
         if (text.isBlank()) { tx.respond(buildResponse(req, 400, toTag = newTag())); return }
-        val ok = runCatching { incomingMessageHandler?.invoke(from?.sipUri?.user, from?.displayName, text) == true }
+        val ok = runCatching { incomingMessageHandler?.invoke(from?.sipUri?.user, from?.displayName, text, TextMeta.readFrom(req.headers)) == true }
             .getOrDefault(false)
         tx.respond(buildResponse(req, if (ok) 200 else 480, toTag = newTag()))
+    }
+
+    private fun onControl(req: SipRequest, tx: ServerTransaction) {
+        val h = controlHandler
+        if (h == null) { tx.respond(buildResponse(req, 415, toTag = newTag())); return }
+        tx.respond(buildResponse(req, 200, toTag = newTag()))
+        val body = req.bodyText
+        runCatching { h(body) }.onFailure { log.warn("control message failed: ${it.message}") }
     }
 
     /**
      * Client mode: send a text to [target] through the server (the gateway turns it into an SMS).
      * [onResult] gets the final SIP code, or null on timeout; called on the UA thread.
      */
-    fun sendMessageTo(target: String, text: String, onResult: (Int?) -> Unit) = post {
+    fun sendMessageTo(target: String, text: String, meta: TextMeta = TextMeta(), onResult: (Int?) -> Unit) =
+        sendOutOfDialog(target, text, "text/plain;charset=UTF-8", meta, onResult)
+
+    private fun sendOutOfDialog(target: String, text: String, contentType: String, meta: TextMeta, onResult: (Int?) -> Unit) = post {
         if (!started || !::serverAddr.isInitialized) { onResult(null); return@post }
         val user = target.filter { it.isLetterOrDigit() || it == '+' || it == '*' || it == '#' }
         val uri = "sip:$user@${account.domain}"
         val req = newRequest("MESSAGE", uri, NameAddr(account.displayName, aor).withTag(newTag()),
             NameAddr(null, uri), newCallId(), 1)
-        req.headers.add("Content-Type", "text/plain;charset=UTF-8")
+        req.headers.add("Content-Type", contentType)
+        meta.writeTo(req.headers)
         req.body = text.toByteArray(Charsets.UTF_8)
         var authTried = false
         fun handle(r: SipResponse?) {
@@ -438,7 +506,8 @@ class SipUserAgent(
                     val auth = authorizationFor(r, "MESSAGE", uri)
                     if (auth == null) { onResult(r.code); return }
                     val again = newRequest("MESSAGE", uri, req.from!!, NameAddr(null, uri), req.callId!!, 2)
-                    again.headers.add("Content-Type", "text/plain;charset=UTF-8")
+                    again.headers.add("Content-Type", contentType)
+                    meta.writeTo(again.headers)
                     again.headers.add(auth.first, auth.second)
                     again.body = req.body
                     sendClient(again) { handle(it) }
@@ -460,8 +529,10 @@ class SipUserAgent(
         val caller = Party(
             number = pai?.sipUri?.user ?: fromAddr.sipUri?.user,
             displayName = pai?.displayName ?: fromAddr.displayName,
+            sim = req.headers[TextMeta.SIM]?.trim()?.toIntOrNull()?.takeIf { it in 1..4 },
         )
-        val call = SipCall(this, LegDirection.INBOUND, caller, target, req.callId!!, newTag())
+        val call = SipCall(this, LegDirection.INBOUND, caller, target, req.callId!!, newTag(),
+            if (config.serverMode) bindingFor(tx.source) else null)
         log.info("incoming INVITE to ${redactNumber(target)} from ${redactNumber(caller.number)}")
         if (handler == null || stopping) {
             tx.respond(buildResponse(req, 480, toTag = call.localTag))
@@ -560,10 +631,7 @@ class SipUserAgent(
         // for about twice that (holdMs) before giving up, so a few missed refreshes still ring through.
         val granted = if (deregister) 0 else minOf(if (expires <= 0) lease else expires, lease)
         if (deregister) {
-            peerExpiry?.cancel(false)
-            peerAor = null; peerContactUri = null
-            setStatus(false, "phone unregistered")
-            log.info("phone unregistered (${redactNumber(aorUser)})")
+            bindings.values.filter { it.addr == from }.forEach { dropBinding(it.ip, "unregistered") }
         } else {
             val cUser = contactNa?.let { SipUri.parse(it.uri)?.user } ?: aorUser ?: "phone"
             learnPeer(aorUser, cUser, from, granted)
@@ -577,21 +645,41 @@ class SipUserAgent(
     /** Server mode: remember where the single phone is reachable (from a REGISTER or an authenticated request). */
     private fun learnPeer(aorUser: String?, contactUser: String, from: InetSocketAddress, granted: Int) {
         // Reach the phone at the address the request actually came from (NAT/roaming friendly).
+        val ip = bindingKey(contactUser, from)
+        val contact = "sip:$contactUser@${from.address.hostAddress}:${from.port}"
+        // A SimBridge phone that was registered under its address before (older version, or a
+        // restart in the middle of an update) is the same device: drop the old binding.
+        if (ip != from.address.hostAddress) bindings[from.address.hostAddress]?.let { dropBinding(it.ip, "now registered as $contactUser") }
+        if (bindings.size >= MAX_PHONES && !bindings.containsKey(ip)) {
+            bindings.values.minByOrNull { it.since }?.let { dropBinding(it.ip, "replaced by a newer phone") }
+        }
+        val b = bindings.getOrPut(ip) { PhoneBinding(ip, contact, from) }
+        b.contactUri = contact; b.addr = from
         peerAor = aorUser
-        peerContactUri = "sip:$contactUser@${from.address.hostAddress}:${from.port}"
+        peerContactUri = contact
         serverAddr = from
         // Use the local address on the phone's network (home Wi-Fi vs. our own hotspot), so
         // SDP and Contact point somewhere the phone can actually reach.
         routeTo(from.address)?.hostAddress?.let { if (it != localIp) { log.info("local address now $it"); localIp = it } }
-        peerExpiry?.cancel(false)
+        b.expiry?.cancel(false)
         val holdMs = granted.toLong() * 2 * 1000 + 30_000
-        peerExpiry = schedule(holdMs) {
+        b.expiry = schedule(holdMs) { dropBinding(ip, "registration expired (no refresh for ${holdMs / 1000}s)") }
+        setStatus(true, if (bindings.size > 1) "${bindings.size} phones registered" else "phone registered: ${redactNumber(aorUser)}")
+        log.info("phone registered: $contactUser @ ${from.address.hostAddress}:${from.port} lease=${granted}s hold=${holdMs / 1000}s (${bindings.size} total)")
+    }
+
+    private fun dropBinding(ip: String, why: String) {
+        val b = bindings.remove(ip) ?: return
+        b.expiry?.cancel(false)
+        log.info("phone $ip $why")
+        val latest = bindings.values.maxByOrNull { it.since }
+        if (latest == null) {
             peerAor = null; peerContactUri = null
-            setStatus(false, "phone registration expired")
-            log.info("phone registration expired (no refresh for ${holdMs / 1000}s)")
+            setStatus(false, "phone $why")
+        } else {
+            peerContactUri = latest.contactUri; serverAddr = latest.addr
+            setStatus(true, if (bindings.size > 1) "${bindings.size} phones registered" else "phone registered")
         }
-        setStatus(true, "phone registered: ${redactNumber(aorUser)}")
-        log.info("phone registered: $aorUser @ ${from.address.hostAddress}:${from.port} lease=${granted}s hold=${holdMs / 1000}s")
     }
 
     // ---------------------------------------------------------------- helpers used by SipCall
@@ -616,15 +704,15 @@ class SipUserAgent(
             }
         }, delayMs, TimeUnit.MILLISECONDS)
 
-    internal fun sendClient(req: SipRequest, handler: (SipResponse?) -> Unit): ClientTransaction {
-        val tx = ClientTransaction(this, req, serverAddr, handler)
+    internal fun sendClient(req: SipRequest, dest: InetSocketAddress? = null, handler: (SipResponse?) -> Unit): ClientTransaction {
+        val tx = ClientTransaction(this, req, dest ?: serverAddr, handler)
         clientTxs[tx.key] = tx
         tx.start()
         return tx
     }
 
     /** Fire-and-forget (ACK for 2xx). */
-    internal fun sendRaw(req: SipRequest) = transport.send(req, serverAddr)
+    internal fun sendRaw(req: SipRequest, dest: InetSocketAddress? = null) = transport.send(req, dest ?: serverAddr)
 
     internal fun removeClientTx(tx: ClientTransaction) {
         if (clientTxs[tx.key] === tx) clientTxs.remove(tx.key)
@@ -727,6 +815,9 @@ class SipUserAgent(
     }
 
     companion object {
+        const val CONTROL_TYPE = "application/vnd.simbridge+json"
+        /** Main phones that may be registered at once (calls ring on all of them). */
+        const val MAX_PHONES = 4
         const val ALLOW = "INVITE, ACK, CANCEL, BYE, OPTIONS, INFO, NOTIFY, UPDATE, MESSAGE"
     }
 }

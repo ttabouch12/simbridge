@@ -15,7 +15,8 @@ enum class LegState {
     ENDED,
 }
 
-data class Party(val number: String?, val displayName: String? = null)
+/** [sim]: SIM slot (1, 2) on a dual-SIM gateway: the line a call came in on, or should go out on. */
+data class Party(val number: String?, val displayName: String? = null, val sim: Int? = null)
 
 /**
  * One side of a call on one technology (cellular, SIP, an AI voice agent, ...).

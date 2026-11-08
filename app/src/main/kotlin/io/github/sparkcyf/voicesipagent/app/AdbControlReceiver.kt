@@ -55,6 +55,13 @@ class AdbControlReceiver : BroadcastReceiver() {
             }
             "power" -> rt.setCompanionPower(intent.getBooleanExtra("on", true))
             "quiet" -> rt.setQuietFlags(intent.getIntExtra("flags", 0))   // 1 sound, 2 vibration, 4 screen
+            // Returns the pairing link as the broadcast result (adb prints it). Creates a key and
+            // password first if the gateway isn't paired yet.
+            "pair-link" -> {
+                val pw = rt.settings.registrarPassword.ifEmpty { rt.resetPairing() }
+                resultData = rt.pairing.pairingUri(pw)
+            }
+            "legacy-udp" -> rt.setLegacyUdp(intent.getBooleanExtra("on", false))
             "reg-password" -> rt.setRegistrarPassword(intent.getStringExtra("password") ?: "")
             "alert-test" -> rt.alerts.post(intent.getStringExtra("text") ?: "Test alert from SimBridge Gateway")
             else -> AppLog.w("adb control: unknown op '$op'")

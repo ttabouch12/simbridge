@@ -72,7 +72,7 @@ fun NewChatScreen(core: LinkCore, onBack: () -> Unit, onPick: (String, String) -
                 Text("To", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextField(
                     value = q, onValueChange = { q = it }, singleLine = true,
-                    placeholder = { Text("Type a name or phone number") },
+                    placeholder = { Text("Name or number (commas for a group)") },
                     keyboardOptions = KeyboardOptions(keyboardType = if (dialpad) KeyboardType.Phone else KeyboardType.Text),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
@@ -84,7 +84,12 @@ fun NewChatScreen(core: LinkCore, onBack: () -> Unit, onPick: (String, String) -
                 }
             }
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = pad.calculateBottomPadding() + 16.dp)) {
-                if (digits.length >= 3) item {
+                // Several numbers separated by commas: a group conversation (sent as MMS).
+                val several = q.split(',', ';').map { s -> s.filter { it.isDigit() || it == '+' } }.filter { it.length >= 3 }
+                if (several.size > 1) item {
+                    val g = io.github.simbridge.Group.address(several)
+                    PickRow("New group", several.joinToString(", "), null) { onPick(MessageStore.keyOf(g), g) }
+                } else if (digits.length >= 3) item {
                     PickRow(digits, "Send to $digits", null) { onPick(MessageStore.keyOf(digits), digits) }
                 }
                 if (!core.contacts.allowed()) item {

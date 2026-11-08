@@ -53,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -73,7 +74,8 @@ import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(core: LinkCore, onBack: () -> Unit) {
+fun SettingsScreen(core: LinkCore, onSimPhone: () -> Unit = {}, onBlocked: () -> Unit = {}, onRecordings: () -> Unit = {},
+                   onBack: () -> Unit) {
     val ctx = LocalContext.current
     val status by core.status.collectAsState()
     var pasting by remember { mutableStateOf(false) }
@@ -108,6 +110,8 @@ fun SettingsScreen(core: LinkCore, onBack: () -> Unit) {
                 ok = connected) {
                 FilledTonalButton({ core.reconnect() }) { Text("Reconnect") }
             }
+            if (connected) NavRow(Icons.Filled.Wifi, "SIM phone", "Signal, battery, USSD codes, remote switches", onSimPhone)
+            NavRow(Icons.Filled.Warning, "Blocked numbers", "Refused at the SIM phone; they never ring here", onBlocked)
             Card(Icons.Filled.Phone, "Calls in the Phone app",
                 if (accountOn) "On. SIM calls ring in your Phone app, and its keypad calls through the SIM phone."
                 else "Turn on the \"SimBridge\" calling account so calls ring here and you can dial from the Phone app.",
@@ -170,6 +174,38 @@ fun SettingsScreen(core: LinkCore, onBack: () -> Unit) {
                     } }, enabled = link.isNotEmpty()) { Text("Pair") }
                 }
             }
+            var autoRec by remember { mutableStateOf(core.prefs.autoRecord) }
+            Card(Icons.Filled.Mic, "Call recording",
+                "Tap Record in the call notification, or record every call. Files are saved on this phone in Recordings/SimBridge. " +
+                    "Recording laws differ by country: tell the other person when required.", ok = true) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Record every call", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    Switch(autoRec, { autoRec = it; core.prefs.autoRecord = it })
+                }
+                TextButton(onRecordings) { Text("Recordings") }
+            }
+            val exportLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json")) { uri ->
+                uri ?: return@rememberLauncherForActivityResult
+                val r = runCatching { io.github.simbridge.Backup.export(ctx, uri) }
+                android.widget.Toast.makeText(ctx, r.fold({ "Exported $it texts" }, { "Export failed: ${it.message}" }),
+                    android.widget.Toast.LENGTH_LONG).show()
+            }
+            val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+                uri ?: return@rememberLauncherForActivityResult
+                val r = runCatching { io.github.simbridge.Backup.import(ctx, uri) }
+                android.widget.Toast.makeText(ctx, r.fold({ "Imported $it texts" }, { "Import failed: ${it.message}" }),
+                    android.widget.Toast.LENGTH_LONG).show()
+            }
+            Card(Icons.Filled.Sms, "Backup",
+                "Save your texts, blocked numbers and settings to a file, or bring them back on a new phone. " +
+                    "The pairing key isn't included: scan the SIM phone's code again.", ok = true) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton({ exportLauncher.launch("simbridge-backup-${java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())}.json") }) { Text("Export") }
+                    TextButton({ importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }) { Text("Import") }
+                }
+            }
             Text("The SIM phone is found automatically on your home Wi-Fi and on its own hotspot. No addresses to enter.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp))
@@ -215,7 +251,23 @@ fun scanPairingCode(ctx: android.content.Context, onResult: (PairedGateway) -> U
 }
 
 @Composable
-private fun Card(icon: ImageVector, title: String, text: String, ok: Boolean, actions: @Composable () -> Unit) {
+internal fun NavRow(icon: ImageVector, title: String, text: String, onClick: () -> Unit) {
+    ElevatedCard(onClick, Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, null, Modifier.size(18.dp).graphicsLayer { rotationZ = 180f },
+                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+internal fun Card(icon: ImageVector, title: String, text: String, ok: Boolean, actions: @Composable () -> Unit) {
     ElevatedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

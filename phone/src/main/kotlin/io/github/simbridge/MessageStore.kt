@@ -17,19 +17,24 @@ data class Msg(
     val outgoing: Boolean,
     val status: Int,
     val read: Boolean,
+    /** SIM slot on a dual-SIM gateway (0 = not known / single SIM). */
+    val sim: Int = 0,
+    /** MMS attachments as JSON (see [Attachments]); empty for plain texts. */
+    val att: String = "",
 ) {
     companion object {
         const val RECEIVED = 0
         const val SENDING = 1
         const val SENT = 2
         const val FAILED = 3
+        const val DELIVERED = 4
     }
 }
 
 data class Conversation(val key: String, val address: String, val last: Msg, val unread: Int)
 
 /** Texts relayed by the SIM phone, kept on this phone. A tiny SQLite table; one row per message. */
-class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", null, 2) {
+class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", null, 3) {
     private val _version = MutableStateFlow(0L)
     /** Bumps on every change; UI re-queries when it moves. */
     val version: StateFlow<Long> = _version
@@ -37,12 +42,16 @@ class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE m (id INTEGER PRIMARY KEY AUTOINCREMENT, k TEXT NOT NULL, addr TEXT NOT NULL, " +
             "body TEXT NOT NULL, ts INTEGER NOT NULL, out INTEGER NOT NULL, status INTEGER NOT NULL, rd INTEGER NOT NULL, " +
-            "sys INTEGER NOT NULL DEFAULT 0)")
+            "sys INTEGER NOT NULL DEFAULT 0, sim INTEGER NOT NULL DEFAULT 0, att TEXT NOT NULL DEFAULT '')")
         db.execSQL("CREATE INDEX m_k ON m(k, ts)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) db.execSQL("ALTER TABLE m ADD COLUMN sys INTEGER NOT NULL DEFAULT 0")
+        if (oldVersion < 3) {
+            db.execSQL("ALTER TABLE m ADD COLUMN sim INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE m ADD COLUMN att TEXT NOT NULL DEFAULT ''")
+        }
     }
 
     /** Remembers the matching row in Android's SMS database (see [SystemSms]). */
@@ -50,15 +59,32 @@ class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", 
         writableDatabase.update("m", ContentValues().apply { put("sys", sysId) }, "id=?", arrayOf(id.toString()))
     }
 
+    fun systemId(id: Long): Long? = readableDatabase.rawQuery("SELECT sys FROM m WHERE id=?", arrayOf(id.toString()))
+        .use { if (it.moveToFirst()) it.getLong(0).takeIf { v -> v > 0 } else null }
+
     private fun changed() { _version.value = _version.value + 1 }
 
-    fun add(address: String, body: String, outgoing: Boolean, status: Int, time: Long = System.currentTimeMillis()): Long {
+    fun add(address: String, body: String, outgoing: Boolean, status: Int, time: Long = System.currentTimeMillis(),
+            sim: Int = 0, att: String = "", read: Boolean = outgoing): Long {
         val id = writableDatabase.insert("m", null, ContentValues().apply {
             put("k", keyOf(address)); put("addr", address); put("body", body); put("ts", time)
-            put("out", if (outgoing) 1 else 0); put("status", status); put("rd", if (outgoing) 1 else 0)
+            put("out", if (outgoing) 1 else 0); put("status", status); put("rd", if (read) 1 else 0)
+            put("sim", sim); put("att", att)
         })
         changed()
         return id
+    }
+
+    /** Every message, oldest first (backup). */
+    fun all(): List<Msg> = readableDatabase.rawQuery("SELECT * FROM m ORDER BY ts, id", null).use { c ->
+        ArrayList<Msg>().apply { while (c.moveToNext()) add(c.msg()) }
+    }
+
+    /** Status only moves forward (a late "sent" never hides "delivered"), except to FAILED. */
+    fun advanceStatus(id: Long, status: Int) {
+        val cur = get(id)?.status ?: return
+        val rank = mapOf(Msg.SENDING to 0, Msg.SENT to 1, Msg.DELIVERED to 2)
+        if (status == Msg.FAILED || (rank[status] ?: 0) > (rank[cur] ?: -1)) setStatus(id, status)
     }
 
     fun setStatus(id: Long, status: Int) {
@@ -79,6 +105,10 @@ class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", 
         if (n > 0) changed()
         return sys
     }
+
+    /** Attachment JSON of every picture message in a conversation (to delete the files). */
+    fun attachmentsIn(key: String): List<String> = readableDatabase.rawQuery("SELECT att FROM m WHERE k=? AND att<>''", arrayOf(key))
+        .use { c -> ArrayList<String>().apply { while (c.moveToNext()) add(c.getString(0)) } }
 
     /** Deletes a conversation; returns the system SMS ids that were copies of it. */
     fun deleteConversation(key: String): List<Long> {
@@ -127,6 +157,8 @@ class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", 
         outgoing = getInt(getColumnIndexOrThrow("out")) == 1,
         status = getInt(getColumnIndexOrThrow("status")),
         read = getInt(getColumnIndexOrThrow("rd")) == 1,
+        sim = getInt(getColumnIndexOrThrow("sim")),
+        att = getString(getColumnIndexOrThrow("att")) ?: "",
     )
 
     companion object {
@@ -136,6 +168,7 @@ class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", 
          * Short codes and alphanumeric senders ("TURKTELEKOM") are kept as they are.
          */
         fun keyOf(address: String): String {
+            if (';' in address) return "G:" + Group.members(address).map { keyOf(it) }.sorted().joinToString(",")
             val digits = address.filter { it.isDigit() }
             return when {
                 digits.length >= 10 && digits.length >= address.count { it.isLetterOrDigit() } -> digits.takeLast(10)

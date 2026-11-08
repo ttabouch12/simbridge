@@ -52,16 +52,16 @@ class SecureLinkTest {
             registrarPassword = "s3cret", tls = TlsSettings(TlsPinning.serverContext(kmf.keyManagers), 0),
             udpEnabled = false, srtp = SrtpMode.REQUIRED, codecs = codecs), log)
         gw.setIncomingCallHandler { leg -> legOut.set(leg); leg.answer() }
-        gw.outgoingMessageHandler = { to, text -> received += to to text; true }
+        gw.outgoingMessageHandler = { to, text, meta -> received += to to (text + (meta.ref?.let { "#$it" } ?: "")); true }
         gw.start()
         repeat(50) { if (gw.tlsPort == null) Thread.sleep(20) }
         return gw
     }
 
-    private fun phone(port: Int, pin: String, password: String = "s3cret",
+    private fun phone(port: Int, pin: String, password: String = "s3cret", user: String = "phone",
                       codecs: List<io.github.sparkcyf.voicesipagent.sip.media.AudioCodec> = listOf(
                           io.github.sparkcyf.voicesipagent.sip.media.AudioCodec.PCMU)): SipUserAgent = SipUserAgent(SipConfig(
-        SipAccount("127.0.0.1", port, "phone", password, domain = "127.0.0.1"), localPort = 0,
+        SipAccount("127.0.0.1", port, user, password, domain = "127.0.0.1"), localPort = 0,
         tls = TlsSettings(TlsPinning.clientContext(pin), 0), srtp = SrtpMode.REQUIRED, registerExpiresSec = 120,
         codecs = codecs), log)
 
@@ -81,7 +81,10 @@ class SecureLinkTest {
         val gw = gateway(ks, texts, gwLeg)
         val ph = phone(gw.tlsPort!!, pin)
         val inbox = CopyOnWriteArrayList<String>()
-        ph.incomingMessageHandler = { from, name, text -> inbox += "$from|$name|$text"; true }
+        ph.incomingMessageHandler = { from, name, text, meta -> inbox += "$from|$name|$text|${meta.sim}"; true }
+        val phCtl = CopyOnWriteArrayList<String>(); val gwCtl = CopyOnWriteArrayList<String>()
+        ph.controlHandler = { phCtl += it }
+        gw.controlHandler = { gwCtl += it }
         try {
             ph.start()
             assertTrue("phone registers over TLS", awaitReady(ph, 5000))
@@ -89,15 +92,22 @@ class SecureLinkTest {
 
             // Text phone -> SIM (challenged, then accepted)
             val code = AtomicInteger(-1); val sent = CountDownLatch(1)
-            ph.sendMessageTo("5555", "KALAN") { code.set(it ?: 0); sent.countDown() }
+            ph.sendMessageTo("5555", "KALAN", TextMeta(ref = "r1")) { code.set(it ?: 0); sent.countDown() }
             assertTrue(sent.await(5, TimeUnit.SECONDS))
             assertTrue("MESSAGE accepted, got ${code.get()}", code.get() in 200..299)
-            assertEquals(listOf("5555" to "KALAN"), texts.toList())
+            assertEquals(listOf("5555" to "KALAN#r1"), texts.toList())
 
             // Text SIM -> phone
-            assertTrue(gw.sendMessage("+905551112233", "merhaba", "Ali"))
+            assertTrue(gw.sendMessage("+905551112233", "merhaba", "Ali", TextMeta(sim = 2)))
             repeat(50) { if (inbox.isEmpty()) Thread.sleep(20) }
-            assertEquals("+905551112233|Ali|merhaba", inbox.firstOrNull())
+            assertEquals("+905551112233|Ali|merhaba|2", inbox.firstOrNull())
+
+            // Control messages both ways
+            ph.sendControl("""{"op":"status"}""")
+            assertTrue(gw.sendControl("""{"op":"missed","from":"123"}"""))
+            repeat(100) { if (phCtl.isEmpty() || gwCtl.isEmpty()) Thread.sleep(20) }
+            assertEquals(listOf("""{"op":"status"}"""), gwCtl.toList())
+            assertEquals(listOf("""{"op":"missed","from":"123"}"""), phCtl.toList())
 
             // Call phone -> gateway with SRTP audio
             val leg = ph.dial("4441444", Party(null))
@@ -148,7 +158,7 @@ class SecureLinkTest {
         val gw = SipUserAgent(SipConfig(SipAccount(server = "", username = "gateway", password = ""), localPort = 0,
             serverMode = true, registrarPassword = "s3cret"), log)
         gw.setIncomingCallHandler { calls.incrementAndGet() }
-        gw.outgoingMessageHandler = { to, text -> texts += to to text; true }
+        gw.outgoingMessageHandler = { to, text, _ -> texts += to to text; true }
         gw.start()
         repeat(50) { if (gw.udpPort == null) Thread.sleep(20) }
         val ph = SipUserAgent(SipConfig(SipAccount("127.0.0.1", gw.udpPort!!, "phone", "s3cret", domain = "127.0.0.1"),
@@ -219,6 +229,58 @@ class SecureLinkTest {
             leg.hangup()
         } finally {
             ph.stop(500); gw.stop(500)
+        }
+    }
+
+    @Test
+    fun incomingCallRingsEveryPhoneAndFirstAnswerWins() {
+        val ks = gatewayKey() ?: return
+        val pin = TlsPinning.fingerprint(ks.getCertificate("gw") as X509Certificate)
+        val gw = gateway(ks, CopyOnWriteArrayList(), AtomicReference())
+        val a = phone(gw.tlsPort!!, pin, user = "phone-aaaa")
+        val b = phone(gw.tlsPort!!, pin, user = "phone-bbbb")
+        val legA = AtomicReference<CallLeg>(); val legB = AtomicReference<CallLeg>()
+        a.setIncomingCallHandler { legA.set(it); it.ring() }
+        b.setIncomingCallHandler { legB.set(it); it.ring() }
+        val inboxA = CopyOnWriteArrayList<String>(); val inboxB = CopyOnWriteArrayList<String>()
+        a.incomingMessageHandler = { _, _, t, _ -> inboxA += t; true }
+        b.incomingMessageHandler = { _, _, t, _ -> inboxB += t; true }
+        try {
+            a.start(); b.start()
+            assertTrue(awaitReady(a, 5000)); assertTrue(awaitReady(b, 5000))
+            repeat(50) { if (gw.registeredPhones < 2) Thread.sleep(20) }
+            assertEquals(2, gw.registeredPhones)
+
+            assertTrue(gw.sendMessage("123", "both", null))
+            repeat(100) { if (inboxA.isEmpty() || inboxB.isEmpty()) Thread.sleep(20) }
+            assertEquals(listOf("both"), inboxA.toList()); assertEquals(listOf("both"), inboxB.toList())
+
+            val call = gw.dial("phone", Party("+15550001"))
+            repeat(100) { if (legA.get() == null || legB.get() == null) Thread.sleep(20) }
+            assertNotNull("phone A rang", legA.get()); assertNotNull("phone B rang", legB.get())
+            repeat(50) { if (call.state != LegState.RINGING) Thread.sleep(20) }
+            assertEquals(LegState.RINGING, call.state)
+            legB.get().answer()
+            repeat(150) { if (call.state != LegState.CONNECTED || legA.get().state != LegState.ENDED) Thread.sleep(20) }
+            assertEquals(LegState.CONNECTED, call.state)
+            assertEquals(LegState.ENDED, legA.get().state)
+            assertEquals(io.github.sparkcyf.voicesipagent.voice.HangupCause.ANSWERED_ELSEWHERE, legA.get().endCause)
+
+            // Audio flows between the gateway and the phone that answered.
+            val gm = call.media!!; val bm = legB.get().media!!
+            var peak = 0
+            for (i in 0 until 50) {
+                gm.writeFrame(ShortArray(VoiceFormat.FRAME_SAMPLES) { k -> (8000 * sin(2 * PI * 440 * (i * 160 + k) / 8000.0)).toInt().toShort() })
+                bm.writeFrame(ShortArray(VoiceFormat.FRAME_SAMPLES))
+                Thread.sleep(20)
+                for (s in bm.readFrame()) peak = maxOf(peak, abs(s.toInt()))
+            }
+            assertTrue("audio reached the answering phone (peak=$peak)", peak > 3000)
+            legB.get().hangup()
+            repeat(100) { if (call.state != LegState.ENDED) Thread.sleep(20) }
+            assertEquals(LegState.ENDED, call.state)
+        } finally {
+            a.stop(500); b.stop(500); gw.stop(500)
         }
     }
 }

@@ -12,4 +12,7 @@ enum class HangupCause {
     CANCELLED,
     NETWORK_ERROR,
     INTERNAL_ERROR,
+
+    /** Rung on several phones and another one answered (SIP CANCEL with Reason cause=200). */
+    ANSWERED_ELSEWHERE,
 }

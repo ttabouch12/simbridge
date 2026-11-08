@@ -106,8 +106,9 @@ class Discovery(private val context: Context, private val onChange: () -> Unit) 
         found.entries.filter { it.value.id == id }.sortedByDescending { it.value.at }
             .forEach { out.putIfAbsent(it.key, Candidate(it.key, it.value.tlsPort, "mdns")) }
         val others = found.filterValues { it.id != null && it.id != id }.keys
-        wifiGateway()?.takeIf { it !in others }?.let { out.putIfAbsent(it, Candidate(it, tlsPort, "gateway")) }
+        // Where it answered last time beats the Wi-Fi router (which is only right on the hotspot).
         lastHost?.takeIf { it !in others }?.let { out.putIfAbsent(it, Candidate(it, tlsPort, "last")) }
+        wifiGateway()?.takeIf { it !in others }?.let { out.putIfAbsent(it, Candidate(it, tlsPort, "gateway")) }
         return out.values.toList()
     }
 

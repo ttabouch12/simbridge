@@ -13,12 +13,15 @@ import android.provider.Telephony
 class SmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
+        // As the default SMS app the same text also arrives as SMS_DELIVER (SmsDeliverReceiver).
+        if (MmsGateway.isDefaultSmsApp(context)) return
         val parts = Telephony.Sms.Intents.getMessagesFromIntent(intent) ?: return
         if (parts.isEmpty()) return
         val from = parts.firstOrNull()?.displayOriginatingAddress
         val body = parts.joinToString("") { it.messageBody ?: "" }
         if (body.isEmpty()) return
         AppLog.i("SMS received; relaying to the registered phone")
-        GatewayRuntime.get(context).forwardSms(from, body)
+        val subId = intent.getIntExtra(android.telephony.SubscriptionManager.EXTRA_SUBSCRIPTION_INDEX, -1).takeIf { it >= 0 }
+        GatewayRuntime.get(context).forwardSms(from, body, subId)
     }
 }

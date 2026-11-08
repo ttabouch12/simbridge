@@ -22,6 +22,10 @@ class Contacts(private val context: Context) {
     fun clearCache() = cache.clear()
 
     fun lookup(number: String?): ContactInfo? {
+        if (number != null && Group.isGroup(number)) {
+            // Group: "Ali, Ayşe, +90555…"
+            return ContactInfo(Group.members(number).joinToString(", ") { m -> lookup(m)?.name?.substringBefore(' ') ?: m }, null)
+        }
         if (number.isNullOrBlank() || !allowed()) return null
         if (number.none { it.isDigit() }) return null
         val k = MessageStore.keyOf(number)

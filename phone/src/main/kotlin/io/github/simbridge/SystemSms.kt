@@ -39,6 +39,20 @@ object SystemSms {
             .getOrNull()?.lastPathSegment?.toLongOrNull()?.takeIf { it > 0 }
     }
 
+    /** Mirrors a delivery result onto the system copy of an outgoing text. */
+    fun setStatus(context: Context, m: Msg) {
+        val sys = context.let { LinkApp.core(it).store.systemId(m.id) } ?: return
+        if (!permitted(context)) return
+        val values = ContentValues().apply {
+            when (m.status) {
+                Msg.DELIVERED -> put(Telephony.Sms.STATUS, Telephony.Sms.STATUS_COMPLETE)
+                Msg.FAILED -> { put(Telephony.Sms.STATUS, Telephony.Sms.STATUS_FAILED); put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_FAILED) }
+                else -> return
+            }
+        }
+        runCatching { context.contentResolver.update(Telephony.Sms.CONTENT_URI, values, "${Telephony.Sms._ID}=?", arrayOf(sys.toString())) }
+    }
+
     fun markRead(context: Context, ids: List<Long>) {
         if (ids.isEmpty() || !permitted(context)) return
         val values = ContentValues().apply { put(Telephony.Sms.READ, 1); put(Telephony.Sms.SEEN, 1) }

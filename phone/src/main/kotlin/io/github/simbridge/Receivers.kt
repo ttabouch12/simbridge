@@ -48,6 +48,12 @@ class ControlReceiver : BroadcastReceiver() {
             "status" -> Log.i("control: status=${core.status.value} ua=${core.ua?.status} account=${Telecom.isEnabled(context)}")
             "send" -> core.sendText(intent.getStringExtra("to") ?: return, intent.getStringExtra("text") ?: return)
             "start" -> LinkService.start(context)
+            "ussd" -> core.control.ussd(intent.getStringExtra("code") ?: return, intent.getIntExtra("sim", 0).takeIf { it > 0 })
+            "ctl" -> core.control.control(intent.getStringExtra("action") ?: return, intent.getBooleanExtra("on", true))
+            "dash" -> core.control.refresh()
+            "rec" -> if (intent.getBooleanExtra("on", true)) ActiveCall.current?.startRecording() else ActiveCall.current?.stopRecording()
+            "block" -> { core.prefs.blocked = core.prefs.blocked + (intent.getStringExtra("number") ?: return); core.blockRulesChanged() }
+            "unblock" -> { core.prefs.blocked = core.prefs.blocked - (intent.getStringExtra("number") ?: return); core.blockRulesChanged() }
             "test-in" -> core.onIncomingText(intent.getStringExtra("from"), null, intent.getStringExtra("text") ?: "test")
         }
         LinkService.start(context)

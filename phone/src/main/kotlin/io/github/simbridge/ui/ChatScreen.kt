@@ -9,6 +9,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +31,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
@@ -81,6 +87,19 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
     var msgs by remember { mutableStateOf(emptyList<Msg>()) }
     var draft by remember(key) { mutableStateOf(initialDraft) }
     var menu by remember { mutableStateOf(false) }
+    var pending by remember(key) { mutableStateOf(emptyList<io.github.simbridge.Attachment>()) }
+    val group = io.github.simbridge.Group.isGroup(address)
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(5)) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        Thread {
+            val added = uris.mapNotNull { io.github.simbridge.Mms.prepareOutgoing(ctx, it) }
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (added.size < uris.size) Toast.makeText(ctx, "Some files are too large for a picture message", Toast.LENGTH_LONG).show()
+                pending = pending + added
+            }
+        }.start()
+    }
     val contact = remember(address) { core.contacts.lookup(address) }
     val name = contact?.name ?: address
     val gateway = isGateway(address)
@@ -108,7 +127,7 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
                     }
                 },
                 actions = {
-                    if (!gateway && address.any { it.isDigit() }) IconButton({ call(ctx, address) }) { Icon(Icons.Filled.Call, "Call") }
+                    if (!gateway && !group && address.any { it.isDigit() }) IconButton({ call(ctx, address) }) { Icon(Icons.Filled.Call, "Call") }
                     IconButton({ menu = true }) { Icon(Icons.Filled.MoreVert, "More") }
                     DropdownMenu(menu, { menu = false }) {
                         DropdownMenuItem(text = { Text("Copy number") }, onClick = { menu = false; copy(ctx, address) })
@@ -121,9 +140,16 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
             )
         },
         bottomBar = {
-            if (!gateway) Composer(draft, { draft = it }, connected = status.state == LinkState.CONNECTED) {
+            if (!gateway) Composer(draft, { draft = it }, connected = status.state == LinkState.CONNECTED,
+                pending = pending, onAttach = {
+                    picker.launch(androidx.activity.result.PickVisualMediaRequest(
+                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }, onRemove = { a -> pending = pending - a }) {
                 val text = draft.trim()
-                if (text.isNotEmpty()) { core.sendText(address, text); draft = "" }
+                when {
+                    pending.isNotEmpty() -> { core.sendMms(address, text, pending); pending = emptyList(); draft = "" }
+                    text.isNotEmpty() -> { core.sendText(address, text); draft = "" }
+                }
             }
         },
     ) { pad ->
@@ -139,7 +165,7 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
                         Text(dayHeader(item.time), style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    is Item.Bubble -> Bubble(item,
+                    is Item.Bubble -> Bubble(item, core, group,
                         onRetry = { core.retry(item.msg) },
                         onCopy = { copy(ctx, item.msg.body) })
                 }
@@ -150,8 +176,10 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Bubble(item: Item.Bubble, onRetry: () -> Unit, onCopy: () -> Unit) {
+private fun Bubble(item: Item.Bubble, core: LinkCore, group: Boolean, onRetry: () -> Unit, onCopy: () -> Unit) {
     val m = item.msg
+    val ctx = LocalContext.current
+    val mms = remember(m.att) { io.github.simbridge.MmsInfo.parse(m.att) }
     val big = 20.dp; val small = 4.dp
     val shape = if (m.outgoing) RoundedCornerShape(big, if (item.joinAbove) small else big, if (item.joinBelow) small else big, big)
     else RoundedCornerShape(if (item.joinAbove) small else big, big, big, if (item.joinBelow) small else big)
@@ -170,7 +198,12 @@ private fun Bubble(item: Item.Bubble, onRetry: () -> Unit, onCopy: () -> Unit) {
         Modifier.fillMaxWidth().padding(top = if (item.joinAbove) 2.dp else 8.dp),
         horizontalAlignment = if (m.outgoing) Alignment.End else Alignment.Start,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        if (group && !m.outgoing && !item.joinAbove) mms?.from?.let { f ->
+            Text(remember(f) { core.contacts.lookup(f)?.name ?: f }, style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp, bottom = 2.dp))
+        }
+        mms?.files?.forEach { a -> AttachmentView(a, m.outgoing) }
+        if (m.body.isNotBlank() || mms == null) Row(verticalAlignment = Alignment.CenterVertically) {
             if (failed) Icon(Icons.Filled.ErrorOutline, null, Modifier.padding(end = 6.dp).size(20.dp),
                 tint = MaterialTheme.colorScheme.error)
             Surface(
@@ -185,9 +218,10 @@ private fun Bubble(item: Item.Bubble, onRetry: () -> Unit, onCopy: () -> Unit) {
             val label = when {
                 failed -> "Not sent · Tap to try again"
                 m.status == Msg.SENDING -> "Sending…"
+                m.status == Msg.DELIVERED -> "Delivered · ${clockTime(m.time)}"
                 m.outgoing -> "Sent · ${clockTime(m.time)}"
                 else -> clockTime(m.time)
-            }
+            } + (if (m.sim > 0) " · SIM ${m.sim}" else "")
             Text(label, Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
                 color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -195,12 +229,29 @@ private fun Bubble(item: Item.Bubble, onRetry: () -> Unit, onCopy: () -> Unit) {
 }
 
 @Composable
-private fun Composer(text: String, onText: (String) -> Unit, connected: Boolean, onSend: () -> Unit) {
+private fun Composer(text: String, onText: (String) -> Unit, connected: Boolean,
+                     pending: List<io.github.simbridge.Attachment>, onAttach: () -> Unit,
+                     onRemove: (io.github.simbridge.Attachment) -> Unit, onSend: () -> Unit) {
+    val ctx = LocalContext.current
     Surface(color = MaterialTheme.colorScheme.surface) {
+      Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding()) {
+        if (pending.isNotEmpty()) Row(Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            pending.forEach { a ->
+                Box {
+                    val bmp = remember(a) { io.github.simbridge.Mms.thumbnail(ctx, a, 160)?.asImageBitmap() }
+                    if (bmp != null) androidx.compose.foundation.Image(bmp, null, Modifier.size(72.dp).clip(RoundedCornerShape(12.dp)),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                    androidx.compose.material3.SmallFloatingActionButton({ onRemove(a) }, Modifier.align(Alignment.TopEnd).size(24.dp)) {
+                        Icon(Icons.Filled.Close, "Remove", Modifier.size(14.dp))
+                    }
+                }
+            }
+        }
         Row(
-            Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 12.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            IconButton(onAttach, Modifier.padding(bottom = 4.dp)) { Icon(Icons.Filled.AddPhotoAlternate, "Add picture") }
             TextField(
                 value = text, onValueChange = onText,
                 placeholder = { Text(if (connected) "Text message" else "Text message · SIM phone offline") },
@@ -212,11 +263,34 @@ private fun Composer(text: String, onText: (String) -> Unit, connected: Boolean,
                     focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
                 modifier = Modifier.weight(1f),
             )
-            FilledIconButton(onClick = onSend, enabled = text.isNotBlank(), modifier = Modifier.size(56.dp)) {
+            FilledIconButton(onClick = onSend, enabled = text.isNotBlank() || pending.isNotEmpty(), modifier = Modifier.size(56.dp)) {
                 Icon(Icons.AutoMirrored.Filled.Send, "Send")
             }
         }
+      }
     }
+}
+
+/** A picture (tap to open full size) or a file chip. */
+@Composable
+private fun AttachmentView(a: io.github.simbridge.Attachment, outgoing: Boolean) {
+    val ctx = LocalContext.current
+    val open = {
+        val f = io.github.simbridge.Mms.fileOf(ctx, a)
+        val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
+        runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, a.type)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        Unit
+    }
+    if (a.isImage) {
+        val bmp = remember(a) { io.github.simbridge.Mms.thumbnail(ctx, a)?.asImageBitmap() }
+        if (bmp != null) androidx.compose.foundation.Image(bmp, "Picture",
+            Modifier.padding(vertical = 2.dp).widthIn(max = 260.dp).clip(RoundedCornerShape(18.dp))
+                .clickable { open() }, contentScale = androidx.compose.ui.layout.ContentScale.FillWidth)
+        return
+    }
+    androidx.compose.material3.AssistChip(onClick = open, label = { Text(a.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        leadingIcon = { Icon(Icons.Filled.AttachFile, null) }, modifier = Modifier.padding(vertical = 2.dp))
 }
 
 private fun buildItems(msgs: List<Msg>): List<Item> {

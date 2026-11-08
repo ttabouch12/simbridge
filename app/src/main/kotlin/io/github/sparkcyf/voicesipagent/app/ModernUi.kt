@@ -219,6 +219,7 @@ fun ModernScreen(rt: GatewayRuntime, setTakeover: (Boolean) -> Unit, openAdvance
             }
             item { NetworkCard(addresses, cur.localSipPort) }
             item { SecurityCard(rt, cur.registrarPassword) }
+            item { MmsCard(rt) }
             item { ActivityCard(log) }
             item {
                 TextButton(onClick = openAdvanced, modifier = Modifier.fillMaxWidth()) {
@@ -395,6 +396,35 @@ private fun SecurityCard(rt: GatewayRuntime, current: String) {
         confirmButton = { TextButton({ qrPassword = rt.resetPairing(); confirmReset = false; showQr = true }) { Text("New key") } },
         dismissButton = { TextButton({ confirmReset = false }) { Text("Cancel") } },
     )
+}
+
+/** Picture and group messages need this app to be the SIM phone's SMS app. */
+@Composable
+private fun MmsCard(rt: GatewayRuntime) {
+    val ctx = LocalContext.current
+    var tick by remember { mutableStateOf(0) }
+    val isDefault = remember(tick) { MmsGateway.isDefaultSmsApp(ctx) }
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { tick++ }
+    GroupCard("Picture & group messages") {
+        ListItem(
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            leadingContent = { Icon(Icons.Rounded.QrCode2, null, tint = if (isDefault) Good else MaterialTheme.colorScheme.onSurfaceVariant) },
+            headlineContent = { Text(if (isDefault) "On" else "Off") },
+            supportingContent = { Text(if (isDefault) "SimBridge Gateway is this phone's SMS app, so MMS and group texts reach your main phone."
+                else "Android only gives MMS to the default SMS app. Make SimBridge Gateway the SMS app here; texts still reach your main phone either way.") },
+        )
+        Row(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!isDefault) Button(onClick = {
+                val rm = ctx.getSystemService(android.app.role.RoleManager::class.java)
+                runCatching { launcher.launch(rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_SMS)) }
+                    .onFailure { rt.control.smsApp(true) }
+            }) { Text("Make SMS app") }
+            else TextButton(onClick = {
+                runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) }
+            }) { Text("Change default apps") }
+        }
+    }
 }
 
 private fun qrBitmap(text: String, size: Int): Bitmap {

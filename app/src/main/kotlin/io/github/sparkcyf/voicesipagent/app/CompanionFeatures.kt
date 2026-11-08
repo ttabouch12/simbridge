@@ -26,49 +26,83 @@ object ContactNames {
     }
 }
 
-/** Sends an SMS from this phone's SIM on behalf of the main phone and reports the result once. */
+/**
+ * Sends an SMS from this phone's SIM on behalf of the main phone. [onResult] fires once when the
+ * radio has sent every part; [onDelivered] fires once if the network returns delivery reports
+ * (true only when every part was delivered). [subId] picks the SIM on dual-SIM phones.
+ */
 object SmsSender {
     private const val ACTION_SENT = "io.github.sparkcyf.voicesipagent.SMS_SENT"
+    private const val ACTION_DELIVERED = "io.github.sparkcyf.voicesipagent.SMS_DELIVERED"
 
     /** Returns false immediately if sending cannot even be attempted. */
-    fun send(ctx: Context, to: String, text: String, onResult: (Boolean, String) -> Unit): Boolean {
+    fun send(ctx: Context, to: String, text: String, subId: Int? = null,
+             onDelivered: ((Boolean) -> Unit)? = null, onResult: (Boolean, String) -> Unit): Boolean {
         if (ctx.checkSelfPermission(Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
             onResult(false, "SEND_SMS not granted")
             return false
         }
         val dest = to.filter { it.isDigit() || it == '+' }
         if (dest.length < 3) { onResult(false, "invalid number"); return false }
-        val sms = ctx.getSystemService(SmsManager::class.java) ?: run { onResult(false, "no SmsManager"); return false }
+        val base = ctx.getSystemService(SmsManager::class.java) ?: run { onResult(false, "no SmsManager"); return false }
+        val sms = if (subId != null) runCatching { base.createForSubscriptionId(subId) }.getOrDefault(base) else base
         val parts = sms.divideMessage(text)
         val token = System.nanoTime().toString()
-        var remaining = parts.size
-        var failed = false
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(c: Context, i: Intent) {
-                if (i.getStringExtra("token") != token) return
-                if (resultCode != android.app.Activity.RESULT_OK) failed = true
-                if (--remaining <= 0) {
-                    runCatching { c.applicationContext.unregisterReceiver(this) }
-                    onResult(!failed, if (failed) "radio error $resultCode" else "sent")
-                }
-            }
+        val app = ctx.applicationContext
+        val sentReceiver = partsReceiver(token, parts.size) { ok, code ->
+            onResult(ok, if (ok) "sent" else "radio error $code")
         }
-        ctx.applicationContext.registerReceiver(receiver, IntentFilter(ACTION_SENT), Context.RECEIVER_NOT_EXPORTED)
-        val intents = ArrayList<PendingIntent>()
-        for (i in parts.indices) {
-            val it = Intent(ACTION_SENT).setPackage(ctx.packageName).putExtra("token", token)
-            intents += PendingIntent.getBroadcast(ctx, (token.hashCode() + i), it,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT)
+        app.registerReceiver(sentReceiver, IntentFilter(ACTION_SENT), Context.RECEIVER_NOT_EXPORTED)
+        val deliveredReceiver = onDelivered?.let { cb ->
+            partsReceiver(token, parts.size, timeoutMs = 6 * 3600_000L, app) { ok, _ -> cb(ok) }
+                .also { app.registerReceiver(it, IntentFilter(ACTION_DELIVERED), Context.RECEIVER_NOT_EXPORTED) }
         }
+        fun pending(action: String, i: Int, salt: Int) = PendingIntent.getBroadcast(ctx, token.hashCode() * 31 + i * 2 + salt,
+            Intent(action).setPackage(ctx.packageName).putExtra("token", token),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT)
+        val sent = ArrayList(parts.indices.map { pending(ACTION_SENT, it, 0) })
+        val delivered = if (onDelivered != null) ArrayList(parts.indices.map { pending(ACTION_DELIVERED, it, 1) }) else null
         return runCatching {
-            if (parts.size == 1) sms.sendTextMessage(dest, null, text, intents[0], null)
-            else sms.sendMultipartTextMessage(dest, null, parts, intents, null)
+            if (parts.size == 1) sms.sendTextMessage(dest, null, text, sent[0], delivered?.get(0))
+            else sms.sendMultipartTextMessage(dest, null, parts, sent, delivered)
             true
         }.getOrElse {
-            runCatching { ctx.applicationContext.unregisterReceiver(receiver) }
+            runCatching { app.unregisterReceiver(sentReceiver) }
+            deliveredReceiver?.let { r -> runCatching { app.unregisterReceiver(r) } }
             onResult(false, it.message ?: it.toString())
             false
         }
+    }
+
+    /**
+     * Counts the per-part results for one message. A delivery report is "delivered" when the
+     * status PDU says so; Android reports it with RESULT_OK and a "format"/"pdu" extra.
+     */
+    private fun partsReceiver(token: String, parts: Int, timeoutMs: Long = 0, app: Context? = null,
+                              done: (Boolean, Int) -> Unit) = object : BroadcastReceiver() {
+        var remaining = parts
+        var failed = false
+        var lastCode = 0
+        init {
+            if (timeoutMs > 0 && app != null) android.os.Handler(android.os.Looper.getMainLooper())
+                .postDelayed({ if (remaining > 0) { remaining = 0; runCatching { app.unregisterReceiver(this) } } }, timeoutMs)
+        }
+        override fun onReceive(c: Context, i: Intent) {
+            if (i.getStringExtra("token") != token || remaining <= 0) return
+            if (resultCode != android.app.Activity.RESULT_OK || !deliveredOk(i)) { failed = true; lastCode = resultCode }
+            if (--remaining <= 0) {
+                runCatching { c.applicationContext.unregisterReceiver(this) }
+                done(!failed, lastCode)
+            }
+        }
+    }
+
+    /** For delivery reports: the SMS-STATUS-REPORT status (0x00..0x1F = delivered). Sent results have no PDU. */
+    private fun deliveredOk(i: Intent): Boolean {
+        val pdu = i.getByteArrayExtra("pdu") ?: return true
+        val sm = runCatching { android.telephony.SmsMessage.createFromPdu(pdu, i.getStringExtra("format")) }.getOrNull() ?: return true
+        val st = sm.status
+        return st == android.provider.Telephony.Sms.STATUS_COMPLETE || st in 0..0x1F
     }
 }
 

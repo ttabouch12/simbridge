@@ -30,6 +30,7 @@ class LinkService : Service() {
         val core = LinkApp.core(this)
         val n = core.notifier.statusNotification(core.status.value)
         val full = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        instance = this
         val fromUi = intent?.getBooleanExtra(EXTRA_UI, false) == true
         // Already running: only re-assert foreground when a visible screen can upgrade it, so a
         // background poke never downgrades microphone access we already hold.
@@ -40,6 +41,10 @@ class LinkService : Service() {
             runCatching { startForeground(Notifier.ID_STATUS, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) }
             false
         }
+        if (micReady) {
+            core.notifier.micAllowed()
+            getSystemService(NotificationManager::class.java).notify(Notifier.ID_STATUS, core.notifier.statusNotification(core.status.value))
+        }
         Log.i("service: running (call audio ${if (micReady) "ready" else "needs the app opened once"})")
         core.start()
         if (watcher == null) watcher = scope.launch {
@@ -49,7 +54,25 @@ class LinkService : Service() {
         return START_STICKY
     }
 
+    /**
+     * During a Telecom call Android lets a ConnectionService app take the phoneCall type, and with
+     * it the microphone, even from the background. Used when the service started without the mic
+     * (after a reboot or update) so the first call still has audio.
+     */
+    private fun upgradeForCall() {
+        if (micReady) return
+        val n = LinkApp.core(this).notifier.statusNotification(LinkApp.core(this).status.value)
+        val base = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+        // phoneCall first: an active Telecom call may make the app eligible for the microphone.
+        runCatching { startForeground(Notifier.ID_STATUS, n, base) }
+            .onFailure { Log.w("service: phoneCall type refused (${it.message})"); LinkApp.core(this).notifier.micBlocked(); return }
+        runCatching { startForeground(Notifier.ID_STATUS, n, base or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE) }
+            .onSuccess { micReady = true; Log.i("service: microphone granted for the call") }
+            .onFailure { Log.w("service: microphone refused in the background"); LinkApp.core(this).notifier.micBlocked() }
+    }
+
     override fun onDestroy() {
+        if (instance === this) instance = null
         scope.cancel()
         super.onDestroy()
     }
@@ -57,6 +80,10 @@ class LinkService : Service() {
     companion object {
         @Volatile var micReady = false
             private set
+        @Volatile private var instance: LinkService? = null
+
+        /** Call when a call goes active; must run on the main thread. */
+        fun onCallActive() { instance?.upgradeForCall() }
 
         private const val EXTRA_UI = "ui"
 

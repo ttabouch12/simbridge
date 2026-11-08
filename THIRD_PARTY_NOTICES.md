@@ -10,14 +10,20 @@ history, authorship and copyright notices are preserved in this repository.
 SimBridge's own additions: the `phone` module (main-phone app: Telecom calling account, call audio,
 mDNS discovery, Messages-style UI, system SMS copy), the gateway's mDNS advertiser, client-side SIP
 MESSAGE support, contact lookup, status alerts, power-saver profile, the new gateway UI, and
-interface-aware SDP addressing. These are licensed under the same terms.
+interface-aware SDP addressing, and in 2.0 the TLS/SRTP transport and pairing, HD voice, MMS codec,
+control channel, call forking, call recording and backup. These are licensed under the same terms.
 
 **SimBridge release APKs do not include the native pjsua2 stack** (the `sip-pjsua2` module is not part of
 the build). Its notices below apply only if you build that module yourself.
 
 SimBridge release APKs include: Kotlin standard library and kotlinx.coroutines (Apache-2.0), AndroidX
-core / activity / Compose UI / Material 3 / Material Icons (Apache-2.0), and the Shizuku API/provider
-libraries (Apache-2.0, gateway only).
+core / activity / Compose UI / Material 3 / Material Icons (Apache-2.0), the Shizuku API/provider
+libraries (Apache-2.0, gateway only), ZXing core 3.5.3 (Apache-2.0, gateway only, for the pairing QR
+code) and Google's code scanner `com.google.android.gms:play-services-code-scanner` 16.1.0 (main phone
+only; a thin client for Google Play services, under the
+[Google APIs Terms of Service](https://developers.google.com/terms) /
+[ML Kit terms](https://developers.google.com/ml-kit/terms)). The code scanner is optional at run time:
+pairing also works by pasting the link.
 
 **Shizuku itself is not bundled.** Install it separately from
 [RikkaApps/Shizuku](https://github.com/RikkaApps/Shizuku) (Apache-2.0) or
@@ -53,6 +59,8 @@ gives explicit permission to link pjproject with OpenSSL.
 | Shizuku API / provider (`dev.rikka.shizuku`) | Apache-2.0 | https://github.com/RikkaApps/Shizuku-API |
 | Kotlin standard library, kotlinx.coroutines | Apache-2.0 | https://github.com/JetBrains/kotlin, https://github.com/Kotlin/kotlinx.coroutines |
 | AndroidX (core, activity, Compose UI, Material 3) | Apache-2.0 | https://android.googlesource.com/platform/frameworks/support |
+| ZXing core (SimBridge Gateway) | Apache-2.0 | https://github.com/zxing/zxing |
+| Google code scanner, `play-services-code-scanner` (SimBridge) | Google APIs ToS / ML Kit terms | https://developers.google.com/ml-kit/vision/barcode-scanning/code-scanner |
 
 The full text of the Apache License 2.0 is available at https://www.apache.org/licenses/LICENSE-2.0 and the
 GNU GPL at https://www.gnu.org/licenses/.

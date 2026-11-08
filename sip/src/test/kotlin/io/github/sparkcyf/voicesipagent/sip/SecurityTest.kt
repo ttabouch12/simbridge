@@ -115,6 +115,20 @@ class SecurityTest {
     }
 
     @Test
+    fun keepAlivesAreReportedWithoutWaitingForTheNextMessage() {
+        val out = java.io.PipedOutputStream()
+        val r = SipStreamReader(java.io.PipedInputStream(out))
+        val pings = java.util.concurrent.LinkedBlockingQueue<Boolean>()
+        val t = Thread { runCatching { r.next { pings.put(it) } } }.apply { isDaemon = true; start() }
+        out.write("\r\n\r\n".toByteArray()); out.flush()
+        assertEquals(true, pings.poll(2, java.util.concurrent.TimeUnit.SECONDS))   // ping: answer now
+        Thread.sleep(1100)
+        out.write("\r\n".toByteArray()); out.flush()
+        assertEquals(false, pings.poll(2, java.util.concurrent.TimeUnit.SECONDS))  // pong
+        out.close(); t.join(1000)
+    }
+
+    @Test
     fun lanFilterAcceptsOnlyPrivateAddresses() {
         for (a in listOf("192.168.1.5", "10.58.140.103", "172.20.0.1", "100.100.1.1", "fe80::1", "fd12::1", "127.0.0.1")) {
             assertTrue(a, LanSourceFilter.isPrivate(InetAddress.getByName(a)))

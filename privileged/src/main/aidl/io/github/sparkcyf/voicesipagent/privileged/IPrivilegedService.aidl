@@ -64,4 +64,7 @@ interface IPrivilegedService {
 
     /** Quiet companion mode (no sound / vibration / screen wake per flags); returns state JSON for restore. */
     String setQuietMode(boolean on, int flags, String savedState) = 13;
+
+    /** Remote-control action from the main phone: mobile-data, hotspot, sms-role, role-holder. Returns a short result. */
+    String remoteAction(String action, String arg) = 14;
 }

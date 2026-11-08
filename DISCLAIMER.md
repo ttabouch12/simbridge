@@ -17,20 +17,26 @@
    includes rules on device registration, SIM ownership, call recording, relaying and VoIP. SimBridge:
    - does **not** change, spoof or clone IMEI numbers, SIM cards or any device identifiers;
    - does **not** connect the main phone to any cellular network (the main phone only uses Wi-Fi);
-   - does **not** record calls or store call audio;
+   - records calls **only when you ask it to** (the *Record* button or *Record every call*), and
+     keeps recordings on your main phone. Many countries and states require the other person's
+     consent before recording: that's your responsibility;
    - is intended for relaying **your own** SIM to **your own** devices.
    Don't use it to get around legal device-registration requirements, to share a line with others
    against your contract, or for any unlawful purpose.
 
-4. **Privacy and security.** Calls and texts travel unencrypted over your local network (SIP/RTP),
-   protected by a password and IP locking. Only use SimBridge on networks you trust. Shizuku gives the
-   gateway powerful system privileges. Install apps only from sources you trust, and verify release
-   checksums.
+4. **Privacy and security.** Calls and texts between the phones are encrypted (TLS + SRTP) and
+   limited to phones paired with the SIM phone's QR code. Keep that code private: anyone who scans it
+   can use your SIM until you tap *New key*. The optional *Allow other SIP apps* mode is unencrypted.
+   Shizuku gives the gateway powerful system privileges. Install apps only from sources you trust,
+   and verify release checksums.
 
 5. **Not affiliated** with Google, Samsung, any phone maker or carrier, or the Shizuku or baresip
    projects. All product names and trademarks belong to their owners and are used only to describe
    compatibility.
 
-6. **Experimental, device-dependent features.** Capturing call audio uses Android APIs that phone makers
+6. **Remote switches.** Turning off mobile data or the hotspot from the main phone can cut the very
+   connection you used to do it; you may have to turn it back on at the SIM phone.
+
+7. **Experimental, device-dependent features.** Capturing call audio uses Android APIs that phone makers
    may restrict or change. SimBridge may not work on your device, or may stop working after a system
    update.

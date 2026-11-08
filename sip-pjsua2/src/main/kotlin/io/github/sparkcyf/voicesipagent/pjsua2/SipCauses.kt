@@ -12,7 +12,7 @@ internal object SipCauses {
         HangupCause.UNAVAILABLE, HangupCause.NORMAL -> 480
         HangupCause.NOT_FOUND -> 404
         HangupCause.FORBIDDEN -> 403
-        HangupCause.CANCELLED -> 487
+        HangupCause.CANCELLED, HangupCause.ANSWERED_ELSEWHERE -> 487
         HangupCause.NETWORK_ERROR -> 503
         HangupCause.INTERNAL_ERROR -> 500
     }

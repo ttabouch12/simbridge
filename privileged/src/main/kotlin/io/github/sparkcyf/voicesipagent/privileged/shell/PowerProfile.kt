@@ -21,7 +21,18 @@ internal object PowerProfile {
     /** Apps that must keep running in the background. */
     private fun keep(pkg: String, self: String) = pkg == self || pkg.contains("shizuku", ignoreCase = true)
 
-    private fun sh(vararg cmd: String) = ShellEnv.run(*cmd, timeoutSec = 15)
+    private const val PARALLEL = 8
+    private val SAFE = Regex("[A-Za-z0-9_.]+")
+
+    private fun sh(vararg cmd: String, timeout: Long = 15) = ShellEnv.run(*cmd, timeoutSec = timeout)
+
+    /** Runs [body] (which sees the package in \$p) for every package, [PARALLEL] at a time. */
+    private fun batch(pkgs: List<String>, body: String): String {
+        if (pkgs.isEmpty()) return ""
+        val script = "n=0\nfor p in ${pkgs.joinToString(" ")}; do\n( $body ) &\n" +
+            "n=${'$'}((n+1)); [ ${'$'}((n % $PARALLEL)) -eq 0 ] && wait\ndone\nwait\n"
+        return sh("sh", "-c", script, timeout = 120).out
+    }
 
     fun apply(on: Boolean, self: String, savedState: String): String =
         try { if (on) enable(self) else { disable(savedState); "" } } catch (t: Throwable) {
@@ -42,18 +53,20 @@ internal object PowerProfile {
         sh("cmd", "bluetooth_manager", "disable")
         val apps = JSONObject()
         val pkgs = sh("pm", "list", "packages", "-3").out.lineSequence()
-            .map { it.removePrefix("package:").trim() }.filter { it.isNotEmpty() && !keep(it, self) }.toList()
-        for (pkg in pkgs) {
-            val op = sh("cmd", "appops", "get", pkg, "RUN_ANY_IN_BACKGROUND").out
+            .map { it.removePrefix("package:").trim() }.filter { SAFE.matches(it) && !keep(it, self) }.toList()
+        // One shell for all apps, eight at a time: reads the old values, then restricts.
+        // Hundreds of separate processes took a minute; this takes a few seconds.
+        val out = batch(pkgs, """o=${'$'}(cmd appops get "${'$'}p" RUN_ANY_IN_BACKGROUND | tr '\n' ' '); b=${'$'}(am get-standby-bucket "${'$'}p")
+            cmd appops set "${'$'}p" RUN_ANY_IN_BACKGROUND ignore; am set-standby-bucket "${'$'}p" restricted; am force-stop "${'$'}p"
+            echo "@@${'$'}p|${'$'}o|${'$'}b"""")
+        for (line in out.lineSequence()) {
+            if (!line.startsWith("@@")) continue
+            val (pkg, op, bucket) = line.removePrefix("@@").split('|', limit = 3).let { Triple(it[0], it.getOrElse(1) { "" }, it.getOrElse(2) { "" }) }
             val mode = when { "ignore" in op -> "ignore"; "allow" in op -> "allow"; else -> "default" }
-            val bucket = sh("am", "get-standby-bucket", pkg).out.trim()
-            apps.put(pkg, JSONObject().put("op", mode).put("bucket", bucket))
-            sh("cmd", "appops", "set", pkg, "RUN_ANY_IN_BACKGROUND", "ignore")
-            sh("am", "set-standby-bucket", pkg, "restricted")
-            sh("am", "force-stop", pkg)
+            apps.put(pkg, JSONObject().put("op", mode).put("bucket", bucket.trim()))
         }
         state.put("apps", apps)
-        Log.i(TAG, "companion power mode ON (${pkgs.size} apps restricted)")
+        Log.i(TAG, "companion power mode ON (${apps.length()} of ${pkgs.size} apps restricted)")
         return state.toString()
     }
 
@@ -70,14 +83,20 @@ internal object PowerProfile {
         if (state.optString("location") == "true") sh("cmd", "location", "set-location-enabled", "true")
         if (state.optString("bluetooth") == "1") sh("cmd", "bluetooth_manager", "enable")
         state.optJSONObject("apps")?.let { apps ->
+            val script = StringBuilder()
             for (pkg in apps.keys()) {
+                if (!SAFE.matches(pkg)) continue
                 val a = apps.optJSONObject(pkg) ?: continue
-                sh("cmd", "appops", "set", pkg, "RUN_ANY_IN_BACKGROUND", a.optString("op", "default"))
+                val op = a.optString("op", "default").takeIf { it in setOf("allow", "ignore", "default") } ?: "default"
                 val b = a.optString("bucket").toIntOrNull()
-                sh("am", "set-standby-bucket", pkg, when {
+                val bucket = when {
                     b == null -> "active"; b <= 10 -> "active"; b <= 20 -> "working_set"; b <= 30 -> "frequent"; b <= 40 -> "rare"; else -> "restricted"
-                })
+                }
+                script.append("(cmd appops set $pkg RUN_ANY_IN_BACKGROUND $op; am set-standby-bucket $pkg $bucket) &\n")
+                script.append("n=${'$'}((n+1)); [ ${'$'}((n % $PARALLEL)) -eq 0 ] && wait\n")
             }
+            script.append("wait\n")
+            sh("sh", "-c", "n=0\n$script", timeout = 120)
         }
         Log.i(TAG, "companion power mode OFF (restored)")
     }

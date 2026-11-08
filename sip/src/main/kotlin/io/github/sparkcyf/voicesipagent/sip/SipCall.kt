@@ -28,9 +28,13 @@ internal class SipCall(
     target: String?,
     val callId: String,
     val localTag: String,
+    /** Server mode: the registered phone this dialog is with (null = the UA's default destination). */
+    @Volatile internal var peer: PhoneBinding? = null,
 ) : AbstractCallLeg(callId.take(8), "sip", direction, remote, target) {
     private val log = ua.logger
     private val config = ua.sipConfig
+    /** Where this dialog's requests go (and where in-dialog requests must come from). */
+    internal val peerAddr: InetSocketAddress? get() = peer?.addr
 
     // Dialog state (RFC 3261 §12)
     private lateinit var localUri: NameAddr
@@ -47,6 +51,7 @@ internal class SipCall(
     private var authAttempts = 0
     private var cancelPending = false
     private var cancelSent = false
+    private var cancelReason: HangupCause? = null
     private var ringTimer: ScheduledFuture<*>? = null
 
     // Inbound INVITE
@@ -114,7 +119,7 @@ internal class SipCall(
             // Device-in-itself: send straight to the registered phone; show the caller's number in From.
             val fromUser = caller.number ?: "gateway"
             localUri = NameAddr(display, "sip:$fromUser@${ua.selfDomain}")
-            remoteUri = NameAddr(null, ua.serverPeerUri() ?: "sip:$target@${ua.selfDomain}")
+            remoteUri = NameAddr(null, peer?.contactUri ?: ua.serverPeerUri() ?: "sip:$target@${ua.selfDomain}")
         } else {
             localUri = NameAddr(display, ua.aor)
             remoteUri = NameAddr(null, "sip:$target@${acct.domain}")
@@ -151,13 +156,14 @@ internal class SipCall(
             val d = config.account.domain.ifBlank { ua.selfDomain }
             req.headers.add("P-Asserted-Identity", "<sip:$it@$d>")
         }
+        callerForRetry?.sim?.let { req.headers.set(TextMeta.SIM, it.toString()) }
         auth?.let { req.headers.add(it.first, it.second) }
         req.headers.add("Content-Type", "application/sdp")
         req.body = localSdp(config.codecs.map { it.payloadType to it }, Sdp.DEFAULT_TE_PT, "sendrecv",
             cryptoFor(null), savp = config.srtp == SrtpMode.REQUIRED).toByteArray()
         req.headers.remove("Accept")
         inviteReq = req
-        inviteTx = ua.sendClient(req) { r -> onInviteResponse(req, r) }
+        inviteTx = ua.sendClient(req, peerAddr) { r -> onInviteResponse(req, r) }
     }
 
     private fun onInviteResponse(req: SipRequest, r: SipResponse?) {
@@ -221,7 +227,7 @@ internal class SipCall(
         val ack = ua.newRequest("ACK", remoteTarget, localUri.withTag(localTag), remoteWithTag(), callId, cseq, routeSet)
         ack.headers.remove("User-Agent")
         ackFor2xx = ack
-        ua.sendRaw(ack)
+        ua.sendRaw(ack, peerAddr)
     }
 
     private fun sendCancel() {
@@ -235,7 +241,8 @@ internal class SipCall(
         h.add("To", invite.headers["To"]!!)
         h.add("Call-ID", callId)
         h.add("CSeq", "${invite.cseq!!.seq} CANCEL")
-        ua.sendClient(SipRequest("CANCEL", invite.uri, h)) {}
+        if (cancelReason == HangupCause.ANSWERED_ELSEWHERE) h.add("Reason", "SIP;cause=200;text=\"Call completed elsewhere\"")
+        ua.sendClient(SipRequest("CANCEL", invite.uri, h), peerAddr) {}
     }
 
     // ------------------------------------------------------------ inbound
@@ -294,11 +301,12 @@ internal class SipCall(
         publishMedia(rtp)
     }
 
-    fun onCancel(tx: ServerTransaction) {
+    fun onCancel(tx: ServerTransaction, cancel: SipRequest? = null) {
         if (tx !== inviteServerTx || tx.isFinal) return
         tx.respond(ua.buildResponse(tx.request, 487, localTag))
-        log.info("call $id cancelled by caller")
-        end(HangupCause.CANCELLED)
+        val elsewhere = cancel?.headers?.get("Reason")?.contains("cause=200") == true
+        log.info("call $id cancelled by caller${if (elsewhere) " (answered elsewhere)" else ""}")
+        end(if (elsewhere) HangupCause.ANSWERED_ELSEWHERE else HangupCause.CANCELLED)
         finish()
     }
 
@@ -392,6 +400,7 @@ internal class SipCall(
             return
         }
         // Outbound, not yet answered: CANCEL once a provisional has arrived (RFC 3261 §9.1).
+        cancelReason = cause
         end(cause)
         val tx = inviteTx
         if (tx == null || tx.completed) {
@@ -405,7 +414,7 @@ internal class SipCall(
 
     private fun sendBye() {
         val bye = ua.newRequest("BYE", remoteTarget, localUri.withTag(localTag), remoteWithTag(), callId, ++localCseq, routeSet)
-        ua.sendClient(bye) { r -> if (r == null || !r.isProvisional) finish() }
+        ua.sendClient(bye, peerAddr) { r -> if (r == null || !r.isProvisional) finish() }
     }
 
     private fun remoteWithTag(): NameAddr = remoteTag?.let(remoteUri::withTag) ?: remoteUri

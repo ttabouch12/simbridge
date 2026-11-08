@@ -20,6 +20,8 @@ import kotlin.math.abs
  */
 class CallAudio {
     @Volatile var muted = false
+    /** Set while the call is being recorded; gets both sides of every frame. */
+    @Volatile var recorder: CallRecorder? = null
     @Volatile private var running = false
     private var thread: Thread? = null
 
@@ -66,7 +68,8 @@ class CallAudio {
             val zero = ShortArray(n)
             repeat(2) { track.write(zero, 0, n) }
             var upPeak = 0; var downPeak = 0; var frames = 0
-            Log.i("audio: started ${rate}Hz, aec=${effects.size}")
+            val silenced = runCatching { rec.activeRecordingConfiguration?.isClientSilenced }.getOrNull()
+            Log.i("audio: started ${rate}Hz, aec=${effects.size}, micSilenced=$silenced")
             while (running) {
                 var got = 0
                 while (got < n && running) {
@@ -79,6 +82,7 @@ class CallAudio {
                 port.writeFrame(up.copyOf())
                 val down = port.readFrame()
                 track.write(down, 0, down.size)
+                recorder?.write(up, down)
                 if (++frames % 250 == 0) {  // every 5 s
                     Log.i("audio: upPeak=$upPeak downPeak=$downPeak muted=$muted")
                     upPeak = 0; downPeak = 0
