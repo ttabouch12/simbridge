@@ -87,7 +87,9 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
         val f = leg.media?.format ?: return
         Captions.clear()
         audio.translator = CallTranslator(core.context, core.prefs, f.sampleRate, f.frameSamples)
+        if (core.prefs.captionBubble) bubble = CaptionBubble(core.context).also { it.show() }
     }
+    private var bubble: CaptionBubble? = null
 
     /** Starts recording both sides to Recordings/SimBridge (Record button or auto-record). */
     @Synchronized fun startRecording() {
@@ -179,6 +181,8 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
         stopRecording()
         if (ActiveCall.current === this) { ActiveCall.current = null; core.notifier.cancelInCall() }
         stopRingback()
+        bubble?.let { b -> android.os.Handler(android.os.Looper.getMainLooper()).post { b.hide() } }
+        bubble = null
         Thread { audio.stop(); audio.translator?.close(); audio.translator = null }.start()
         core.legs.remove(leg.id)
         setDisconnected(dc)

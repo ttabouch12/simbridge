@@ -85,7 +85,8 @@ class CallAudio {
                 val up = if (muted) zero else tr?.uplink(buf) ?: buf
                 port.writeFrame(up.copyOf())
                 val down = port.readFrame()
-                track.write(down, 0, down.size)
+                val play = tr?.downlink(down) ?: down
+                track.write(play, 0, play.size)
                 tr?.heard(down)
                 recorder?.write(up, down)
                 if (++frames % 250 == 0) {  // every 5 s

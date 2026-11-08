@@ -7,25 +7,30 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import java.util.Locale
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import kotlin.math.max
 import kotlin.math.sqrt
 
-/** OFF: nothing. CAPTIONS: the caller's Turkish shows as English text. VOICE: also, my English is spoken to them in Turkish. */
+/** OFF: nothing. CAPTIONS: the caller's speech shows translated. VOICE: also, my speech is spoken to them translated. */
 enum class TranslateMode { OFF, CAPTIONS, VOICE }
 
-/** One finished line: who spoke, what was heard, and its translation. */
-data class Caption(val fromCaller: Boolean, val heard: String, val translated: String)
+/** One line: who spoke, what was heard, and its translation (null while translating). */
+data class Caption(val id: Long, val fromCaller: Boolean, val heard: String, val translated: String?)
 
-/** Captions of the current (or last) call, shown by CaptionActivity. Changed on the main thread only. */
+/** Captions of the current (or last) call, shown by CaptionActivity and the floating bubble. Main thread only. */
 object Captions {
     val lines = mutableStateListOf<Caption>()
     var info by mutableStateOf("")
+    var mode by mutableStateOf(TranslateMode.OFF)
     private val main = Handler(Looper.getMainLooper())
     fun add(c: Caption) { main.post { lines += c; if (lines.size > 300) lines.removeAt(0) } }
+    fun update(id: Long, translated: String) {
+        main.post { val i = lines.indexOfFirst { it.id == id }; if (i >= 0) lines[i] = lines[i].copy(translated = translated) }
+    }
     fun say(s: String) { main.post { info = s } }
+    fun showMode(m: TranslateMode) { main.post { mode = m } }
     fun clear() { main.post { lines.clear(); info = "" } }
 }
 
@@ -33,28 +38,45 @@ object Captions {
  * Translates one call. The audio thread only measures loudness and queues finished utterances;
  * recognition, translation and speech run on one worker per direction, so the call never stutters.
  */
-class CallTranslator(private val ctx: Context, prefs: Prefs, private val rate: Int, private val frame: Int) {
+class CallTranslator(private val ctx: Context, private val prefs: Prefs, private val rate: Int, private val frame: Int) {
+    private val callerLang = prefs.callerLang
+    private val myLang = prefs.myLang
     private val speech = Speech(ctx, prefs)
     private val callerJobs = Executors.newSingleThreadExecutor()
     private val myJobs = Executors.newSingleThreadExecutor()
-    private val theirs = Segmenter(rate) { pcm -> runCatching { callerJobs.execute { handle(pcm, fromCaller = true) } } }
-    private val mine = Segmenter(rate) { pcm -> runCatching { myJobs.execute { handle(pcm, fromCaller = false) } } }
-    /** Turkish speech for the caller, in call-sized frames (up to 60 s). */
+    private val theirs = Segmenter(rate, prefs.pauseMs) { pcm -> runCatching { callerJobs.execute { handle(pcm, fromCaller = true) } } }
+    private val mine = Segmenter(rate, prefs.pauseMs) { pcm -> runCatching { myJobs.execute { handle(pcm, fromCaller = false) } } }
+    /** Translated speech for the caller, and for me, in call-sized frames (up to 60 s each). */
     private val toCaller = LinkedBlockingQueue<ShortArray>(3000)
+    private val toMe = LinkedBlockingQueue<ShortArray>(3000)
     private val silence = ShortArray(frame)
+    private val recent = ArrayDeque<String>()
+    private val seq = AtomicLong()
     private var voice: Voice? = null
 
     @Volatile var mode: TranslateMode = prefs.translateMode
         set(v) {
             field = v
-            if (v == TranslateMode.VOICE) runCatching { myJobs.execute { voice() } }   // warm up the TTS engine
+            Captions.showMode(v)
+            if (v == TranslateMode.VOICE || prefs.speakToMe) runCatching { myJobs.execute { voice() } }   // warm up TTS
         }
 
-    init { if (mode == TranslateMode.VOICE) myJobs.execute { voice() } }
+    init {
+        Captions.showMode(mode)
+        if (mode == TranslateMode.VOICE || prefs.speakToMe) myJobs.execute { voice() }
+        Thread({ speech.warmUp() }, "translate-warmup").start()
+    }
 
-    /** Audio thread: one frame of the caller's voice. */
+    /** Audio thread: one frame of the caller's voice, as received. */
     fun heard(down: ShortArray) {
         if (mode != TranslateMode.OFF) theirs.push(down)
+    }
+
+    /** Audio thread: what I hear; translations read to me are mixed over the (quieter) caller. */
+    fun downlink(down: ShortArray): ShortArray {
+        if (mode == TranslateMode.OFF) { toMe.clear(); return down }
+        val t = toMe.poll() ?: return down
+        return ShortArray(down.size) { i -> (down[i] * 0.3 + t[i]).toInt().coerceIn(-32768, 32767).toShort() }
     }
 
     /** Audio thread: one frame from my mic; returns what the caller hears instead. */
@@ -73,19 +95,41 @@ class CallTranslator(private val ctx: Context, prefs: Prefs, private val rate: I
 
     private fun handle(pcm: ShortArray, fromCaller: Boolean) {
         if (mode == TranslateMode.OFF) return
-        val from = if (fromCaller) "tr" else "en"
-        val to = if (fromCaller) "en" else "tr"
+        val from = if (fromCaller) callerLang else myLang
+        val to = if (fromCaller) myLang else callerLang
+        val t0 = System.currentTimeMillis()
         val heard = speech.transcribe(pcm, rate, from)?.trim().orEmpty()
+        val t1 = System.currentTimeMillis()
         if (heard.isEmpty() || Speech.isJunk(heard)) return
-        val said = speech.translate(heard, from, to)?.trim()
-        Captions.add(Caption(fromCaller, heard, said ?: "(not translated)"))
-        if (fromCaller || said.isNullOrEmpty() || mode != TranslateMode.VOICE) return
-        val out = voice().synth(said, Locale.forLanguageTag("tr-TR"), rate) ?: return
+        val id = seq.incrementAndGet()
+        Captions.add(Caption(id, fromCaller, heard, null))   // show what was heard right away
+        val context = synchronized(recent) { recent.toList() }
+        val said = speech.translate(heard, from, to, context)?.trim()
+        val t2 = System.currentTimeMillis()
+        Captions.update(id, said ?: "(not translated)")
+        synchronized(recent) { recent.addLast(heard); while (recent.size > 3) recent.removeFirst() }
+        var tts = 0L
+        if (!said.isNullOrEmpty()) {
+            val target = when {
+                !fromCaller && mode == TranslateMode.VOICE -> toCaller
+                fromCaller && prefs.speakToMe -> toMe
+                else -> null
+            }
+            if (target != null) {
+                val out = voice().synth(said, to, rate)
+                tts = System.currentTimeMillis() - t2
+                if (out != null) enqueue(out, target)
+            }
+        }
+        Log.i("translate: ${if (fromCaller) "caller" else "me"} audio=${pcm.size * 1000L / rate}ms stt=${t1 - t0}ms mt=${t2 - t1}ms tts=${tts}ms")
+    }
+
+    private fun enqueue(out: ShortArray, q: LinkedBlockingQueue<ShortArray>) {
         var i = 0
         while (i < out.size) {
             val f = ShortArray(frame)
             System.arraycopy(out, i, f, 0, minOf(frame, out.size - i))
-            if (!toCaller.offer(f)) break
+            if (!q.offer(f)) break
             i += frame
         }
     }
@@ -93,9 +137,9 @@ class CallTranslator(private val ctx: Context, prefs: Prefs, private val rate: I
 
 /**
  * Cuts 20 ms frames into utterances by loudness: starts on speech (with 300 ms lead-in),
- * ends after 0.7 s of quiet or 15 s. The noise floor adapts so line hiss doesn't count as speech.
+ * ends after [pauseMs] of quiet or 15 s. The noise floor adapts so line hiss doesn't count as speech.
  */
-class Segmenter(private val rate: Int, private val onUtterance: (ShortArray) -> Unit) {
+class Segmenter(private val rate: Int, private val pauseMs: Int, private val onUtterance: (ShortArray) -> Unit) {
     private val lead = ArrayDeque<ShortArray>()
     private val out = ArrayList<ShortArray>()
     private var speaking = false
@@ -117,7 +161,7 @@ class Segmenter(private val rate: Int, private val onUtterance: (ShortArray) -> 
         }
         out += f
         if (loud) { loudMs += ms; quietMs = 0 } else quietMs += ms
-        if (quietMs >= 700 || out.size * ms >= 15_000) {
+        if (quietMs >= pauseMs || out.size * ms >= 15_000) {
             if (loudMs >= 300) onUtterance(Pcm.concat(out))
             speaking = false
             out.clear()

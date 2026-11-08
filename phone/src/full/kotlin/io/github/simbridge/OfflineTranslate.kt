@@ -23,10 +23,10 @@ object OfflineTranslate {
         Tasks.await(t.translate(text), 10, TimeUnit.SECONDS)
     }.onFailure { Log.w("translate: on-device translation failed", it); Captions.say("On-device translation failed: ${it.message}") }.getOrNull()
 
-    /** Downloads both directions in the background. */
-    fun prepare(@Suppress("UNUSED_PARAMETER") ctx: Context) {
-        client("tr", "en").downloadModelIfNeeded()
-        client("en", "tr").downloadModelIfNeeded()
+    /** Downloads both directions of a language pair in the background. */
+    fun prepare(@Suppress("UNUSED_PARAMETER") ctx: Context, a: String, b: String) {
+        client(a, b).downloadModelIfNeeded()
+        client(b, a).downloadModelIfNeeded()
     }
 
 }

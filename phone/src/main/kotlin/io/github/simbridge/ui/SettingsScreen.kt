@@ -6,6 +6,8 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.telecom.TelecomManager
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -329,33 +331,113 @@ private fun TranslationCard(core: LinkCore) {
     val ctx = LocalContext.current
     val prefs = core.prefs
     var mode by remember { mutableStateOf(prefs.translateMode) }
+    var engine by remember { mutableStateOf(prefs.translateEngine) }
+    var caller by remember { mutableStateOf(prefs.callerLang) }
+    var mine by remember { mutableStateOf(prefs.myLang) }
+    var pause by remember { mutableIntStateOf(prefs.pauseMs) }
     var onDevice by remember { mutableStateOf(prefs.translateOnDevice) }
-    var key by remember { mutableStateOf(prefs.groqKey) }
+    var speakToMe by remember { mutableStateOf(prefs.speakToMe) }
+    var bubble by remember { mutableStateOf(prefs.captionBubble) }
+    var large by remember { mutableStateOf(prefs.captionLarge) }
+    var groq by remember { mutableStateOf(prefs.groqKey) }
+    var cerebras by remember { mutableStateOf(prefs.cerebrasKey) }
+    var gemini by remember { mutableStateOf(prefs.geminiKey) }
     var model by remember { mutableStateOf(prefs.translateModel) }
-    var showKey by remember { mutableStateOf(false) }
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { delay(1500); tick++ } }
+    val overlayOk = remember(tick) { Settings.canDrawOverlays(ctx) }
+    fun open(url: String) = runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+
     Card(Icons.Filled.Translate, stringResource(R.string.set_translate), stringResource(R.string.set_translate_text), ok = true) {
+        Text(stringResource(R.string.set_tr_start), style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(io.github.simbridge.TranslateMode.OFF to R.string.tr_off, io.github.simbridge.TranslateMode.CAPTIONS to R.string.tr_captions,
                 io.github.simbridge.TranslateMode.VOICE to R.string.tr_voice).forEach { (m, label) ->
                 androidx.compose.material3.FilterChip(mode == m, { mode = m; prefs.translateMode = m }, { Text(stringResource(label)) })
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.set_translate_offline), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-            Switch(onDevice, {
-                onDevice = it; prefs.translateOnDevice = it
-                if (it) { io.github.simbridge.OfflineTranslate.prepare(ctx); io.github.simbridge.OnDeviceStt.prepare(ctx) }
-            })
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LangPicker(stringResource(R.string.set_tr_caller), caller, Modifier.weight(1f)) { caller = it; prefs.callerLang = it }
+            LangPicker(stringResource(R.string.set_tr_me), mine, Modifier.weight(1f)) { mine = it; prefs.myLang = it }
+        }
+
+        Spacer(Modifier.size(8.dp))
+        Text(stringResource(R.string.set_tr_engine), style = MaterialTheme.typography.labelLarge)
+        io.github.simbridge.Engine.entries.forEach { e ->
+            Row(Modifier.fillMaxWidth().clickable { engine = e; prefs.translateEngine = e }, verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.RadioButton(engine == e, { engine = e; prefs.translateEngine = e })
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(e.title), style = MaterialTheme.typography.bodyLarge)
+                    Text(stringResource(e.note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
         if (!onDevice) {
-            OutlinedTextField(key, { key = it; prefs.groqKey = it }, Modifier.fillMaxWidth(), singleLine = true,
-                label = { Text(stringResource(R.string.set_groq_key)) },
-                visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = { IconButton({ showKey = !showKey }) { Icon(if (showKey) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, null) } })
-            OutlinedTextField(model, { model = it; prefs.translateModel = it }, Modifier.fillMaxWidth(), singleLine = true,
-                label = { Text(stringResource(R.string.set_translate_model)) })
-            TextButton({ ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://console.groq.com/keys"))) }) {
-                Text(stringResource(R.string.set_groq_get))
+            KeyField(stringResource(R.string.set_groq_key), groq, "https://console.groq.com/keys", ::open) { groq = it; prefs.groqKey = it }
+            if (engine == io.github.simbridge.Engine.CEREBRAS)
+                KeyField(stringResource(R.string.set_cerebras_key), cerebras, engine.keyUrl, ::open) { cerebras = it; prefs.cerebrasKey = it }
+            if (engine == io.github.simbridge.Engine.GEMINI)
+                KeyField(stringResource(R.string.set_gemini_key), gemini, engine.keyUrl, ::open) { gemini = it; prefs.geminiKey = it }
+            if (engine != io.github.simbridge.Engine.ON_DEVICE)
+                OutlinedTextField(model, { model = it; prefs.translateModel = it }, Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text(stringResource(R.string.set_translate_model)) }, placeholder = { Text(engine.model) })
+        }
+
+        Spacer(Modifier.size(8.dp))
+        Text(stringResource(R.string.set_tr_pause), style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(450 to R.string.set_tr_fast, 600 to R.string.set_tr_normal, 900 to R.string.set_tr_patient).forEach { (ms, label) ->
+                androidx.compose.material3.FilterChip(pause == ms, { pause = ms; prefs.pauseMs = ms }, { Text(stringResource(label)) })
+            }
+        }
+        SwitchRow(stringResource(R.string.set_tr_bubble), bubble) {
+            bubble = it; prefs.captionBubble = it
+            if (it && !overlayOk)
+                runCatching { ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName))) }
+        }
+        if (bubble && !overlayOk) TextButton({
+            runCatching { ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName))) }
+        }) { Text(stringResource(R.string.set_tr_bubble_allow)) }
+        SwitchRow(stringResource(R.string.set_tr_speak_me), speakToMe) { speakToMe = it; prefs.speakToMe = it }
+        SwitchRow(stringResource(R.string.set_tr_large), large) { large = it; prefs.captionLarge = it }
+        SwitchRow(stringResource(R.string.set_translate_offline), onDevice) {
+            onDevice = it; prefs.translateOnDevice = it
+            if (it) { io.github.simbridge.OfflineTranslate.prepare(ctx, caller, mine); io.github.simbridge.OnDeviceStt.prepare(ctx, listOf(caller, mine)) }
+        }
+    }
+}
+
+@Composable
+private fun SwitchRow(text: String, on: Boolean, set: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Switch(on, set)
+    }
+}
+
+@Composable
+private fun KeyField(label: String, value: String, url: String, open: (String) -> Unit, set: (String) -> Unit) {
+    var show by remember { mutableStateOf(false) }
+    OutlinedTextField(value, set, Modifier.fillMaxWidth(), singleLine = true, label = { Text(label) },
+        visualTransformation = if (show) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = { IconButton({ show = !show }) { Icon(if (show) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, null) } })
+    TextButton({ open(url) }) { Text(stringResource(R.string.set_get_key, Uri.parse(url).host ?: url)) }
+}
+
+@Composable
+private fun LangPicker(label: String, code: String, modifier: Modifier, pick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box(modifier) {
+        androidx.compose.material3.OutlinedButton({ open = true }, Modifier.fillMaxWidth()) {
+            Column {
+                Text(label, style = MaterialTheme.typography.labelSmall)
+                Text(io.github.simbridge.Langs.label(code))
+            }
+        }
+        androidx.compose.material3.DropdownMenu(open, { open = false }) {
+            io.github.simbridge.Langs.all.forEach { c ->
+                androidx.compose.material3.DropdownMenuItem({ Text(io.github.simbridge.Langs.label(c) + "  ·  " + io.github.simbridge.Langs.name(c)) },
+                    { pick(c); open = false })
             }
         }
     }

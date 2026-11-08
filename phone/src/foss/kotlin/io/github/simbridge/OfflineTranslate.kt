@@ -10,6 +10,6 @@ object OfflineTranslate {
         return null
     }
 
-    fun prepare(@Suppress("UNUSED_PARAMETER") ctx: Context) = Unit
+    @Suppress("UNUSED_PARAMETER") fun prepare(ctx: Context, a: String, b: String) = Unit
 
 }
