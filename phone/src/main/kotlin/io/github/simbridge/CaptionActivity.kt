@@ -63,15 +63,20 @@ internal fun ModeChips() {
     }
 }
 
-/** Status line plus the scrolling caption chat; newest at the bottom. */
+/**
+ * Status line plus the scrolling caption chat; newest at the bottom. Laid out bottom-up so a line
+ * growing (its translation arriving) stays in view; follows new lines unless I scrolled back to read.
+ */
 @Composable
 internal fun CaptionList(modifier: Modifier, large: Boolean, compact: Boolean = false) {
     val list = rememberLazyListState()
-    LaunchedEffect(Captions.lines.size) { if (Captions.lines.isNotEmpty()) list.animateScrollToItem(Captions.lines.size - 1) }
+    val newest = Captions.lines.asReversed()
+    LaunchedEffect(Captions.lines.size) { if (list.firstVisibleItemIndex <= 1) list.animateScrollToItem(0) }
     Column(modifier) {
         if (Captions.info.isNotEmpty()) Text(Captions.info, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-        LazyColumn(Modifier.fillMaxWidth(), state = list, verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 8.dp)) {
-            items(Captions.lines, key = { it.id }) { CaptionLine(it, large, compact) }
+        LazyColumn(Modifier.fillMaxWidth(), state = list, reverseLayout = true,
+            verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 8.dp, Alignment.Bottom)) {
+            items(newest, key = { it.id }) { CaptionLine(it, large, compact) }
         }
     }
 }

@@ -1,5 +1,17 @@
 # Changelog
 
+## SimBridge 2.2.0
+
+### Main phone
+- **Live call translation** for relayed calls (Settings > Call translation):
+  - **Captions:** the caller's words appear translated in a floating window over the call screen
+    (or tap Translate in the call notification for full screen).
+  - **Captions + voice:** your words are also spoken to the caller in their language.
+  - 19 languages (Turkish, English, Arabic, Persian, Russian, Ukrainian, French, German, Spanish and more).
+  - Free engines: Groq GPT-OSS 120B / 20B, Cerebras GPT-OSS 120B, Google Gemini 2.5 Flash-Lite,
+    or on-device (ML Kit, full build only). Speech recognition: Groq Whisper or on-device.
+  - Options: pause length, read the caller's translation to you, large text, on-device only.
+
 ## SimBridge 2.1.0
 
 ### Main phone

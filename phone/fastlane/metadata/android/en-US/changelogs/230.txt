@@ -1,0 +1,1 @@
+Live call translation: captions of the caller's words in your language in a floating window, and optional translated voice to the caller. 19 languages; free cloud engines (Groq, Cerebras, Gemini) or on-device.

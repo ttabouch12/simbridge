@@ -102,7 +102,7 @@ private fun Bubble(move: (Float, Float) -> Unit, openFull: () -> Unit) {
             }
         }
     } else {
-        Surface(Modifier.width(310.dp).heightIn(max = 380.dp), shape = RoundedCornerShape(20.dp), shadowElevation = 8.dp) {
+        Surface(Modifier.width(310.dp).heightIn(max = 420.dp), shape = RoundedCornerShape(20.dp), shadowElevation = 8.dp) {
             Column(Modifier.padding(10.dp)) {
                 Row(drag.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.translate), Modifier.weight(1f).padding(start = 6.dp), style = MaterialTheme.typography.titleMedium)
