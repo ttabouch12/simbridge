@@ -53,6 +53,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Contacts
+import androidx.compose.material.icons.filled.Refresh
+import io.github.simbridge.R
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -75,7 +80,7 @@ import kotlinx.coroutines.delay
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(core: LinkCore, onSimPhone: () -> Unit = {}, onBlocked: () -> Unit = {}, onRecordings: () -> Unit = {},
-                   onBack: () -> Unit) {
+                   onBack: (() -> Unit)?) {
     val ctx = LocalContext.current
     val status by core.status.collectAsState()
     var pasting by remember { mutableStateOf(false) }
@@ -94,8 +99,8 @@ fun SettingsScreen(core: LinkCore, onSimPhone: () -> Unit = {}, onBlocked: () ->
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         topBar = {
             LargeTopAppBar(
-                title = { Text("Settings") },
-                navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                title = { Text(stringResource(R.string.tab_settings)) },
+                navigationIcon = { onBack?.let { IconButton(it) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } } },
                 scrollBehavior = scroll,
             )
         },
@@ -105,84 +110,82 @@ fun SettingsScreen(core: LinkCore, onSimPhone: () -> Unit = {}, onBlocked: () ->
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             val connected = status.state == LinkState.CONNECTED
-            Card(Icons.Filled.Wifi, "Connection",
-                if (connected) "Connected via ${status.network} (${status.host})" else status.detail.ifBlank { "Not connected" },
+            Card(Icons.Filled.Wifi, stringResource(R.string.set_connection),
+                if (connected) stringResource(R.string.set_connected_via, status.network ?: "",status.host ?: "") else status.detail.ifBlank { stringResource(R.string.not_connected) },
                 ok = connected) {
-                FilledTonalButton({ core.reconnect() }) { Text("Reconnect") }
+                FilledTonalButton({ core.reconnect() }) { Text(stringResource(R.string.reconnect)) }
             }
-            if (connected) NavRow(Icons.Filled.Wifi, "SIM phone", "Signal, battery, USSD codes, remote switches", onSimPhone)
-            NavRow(Icons.Filled.Warning, "Blocked numbers", "Refused at the SIM phone; they never ring here", onBlocked)
-            Card(Icons.Filled.Phone, "Calls in the Phone app",
-                if (accountOn) "On. SIM calls ring in your Phone app, and its keypad calls through the SIM phone."
-                else "Turn on the \"SimBridge\" calling account so calls ring here and you can dial from the Phone app.",
+            NavRow(Icons.Filled.Warning, stringResource(R.string.blocked_title), stringResource(R.string.blocked_sub), onBlocked)
+            Card(Icons.Filled.Phone, stringResource(R.string.set_calls),
+                if (accountOn) stringResource(R.string.set_calls_on)
+                else stringResource(R.string.set_calls_off),
                 ok = accountOn) {
                 if (!accountOn) Button({
                     runCatching { ctx.startActivity(Intent(TelecomManager.ACTION_CHANGE_PHONE_ACCOUNTS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                }) { Text("Open calling accounts") }
+                }) { Text(stringResource(R.string.set_open_accounts)) }
             }
-            Card(Icons.Filled.Mic, "Call audio",
-                if (LinkService.micReady) "Ready." else "Open this app once after restarting this phone so calls have sound.",
+            Card(Icons.Filled.Mic, stringResource(R.string.set_audio),
+                if (LinkService.micReady) stringResource(R.string.ready) else stringResource(R.string.set_audio_off),
                 ok = LinkService.micReady) {}
-            Card(Icons.Filled.BatteryChargingFull, "Stay connected in the background",
-                if (batteryOk) "On. Android won't put SimBridge to sleep."
-                else "Allow SimBridge to run in the background so calls and texts arrive while the screen is off.",
+            Card(Icons.Filled.BatteryChargingFull, stringResource(R.string.set_battery),
+                if (batteryOk) stringResource(R.string.set_battery_on)
+                else stringResource(R.string.set_battery_off),
                 ok = batteryOk) {
                 if (!batteryOk) Button({
                     runCatching {
                         ctx.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
                             Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     }
-                }) { Text("Allow") }
+                }) { Text(stringResource(R.string.allow)) }
             }
             val mirrorOk = remember(tick) { SystemSms.permitted(ctx) }
             val smsDefault = remember(tick) { isDefaultSmsApp(ctx) }
             var mirrorOn by remember { mutableStateOf(core.prefs.mirrorToSystem) }
-            Card(Icons.Filled.Sms, "Default SMS app",
-                if (smsDefault) "SimBridge is your SMS app. Texts are saved to the phone, \"Message\" buttons in other apps open SimBridge, and the Phone app's \"Reply with message\" sends through your SIM."
-                else "Optional. Make SimBridge the phone's SMS app so \"Message\" buttons in Contacts and other apps open it, and quick replies to calls work. No computer needed.",
+            Card(Icons.Filled.Sms, stringResource(R.string.set_sms),
+                if (smsDefault) stringResource(R.string.set_sms_on)
+                else stringResource(R.string.set_sms_off),
                 ok = true) {
                 if (!smsDefault) FilledTonalButton({ smsRole.launch(ctx.getSystemService(android.app.role.RoleManager::class.java)
-                    .createRequestRoleIntent(android.app.role.RoleManager.ROLE_SMS)) }) { Text("Make default SMS app") }
+                    .createRequestRoleIntent(android.app.role.RoleManager.ROLE_SMS)) }) { Text(stringResource(R.string.set_sms_make)) }
             }
-            if (!smsDefault) Card(Icons.Filled.Sms, "Show texts in your Messages app",
+            if (!smsDefault) Card(Icons.Filled.Sms, stringResource(R.string.set_mirror),
                 when {
-                    !mirrorOn -> "Off. Texts are only in SimBridge."
-                    mirrorOk -> "On. Texts are also copied to your default Messages app. Reply from SimBridge: the Messages app can't send without a SIM."
-                    else -> "Android only lets the default Messages app add texts. Allow SimBridge once from a computer:\n" +
+                    !mirrorOn -> stringResource(R.string.set_mirror_off)
+                    mirrorOk -> stringResource(R.string.set_mirror_on)
+                    else -> stringResource(R.string.set_mirror_adb) +
                         "adb shell appops set ${ctx.packageName} WRITE_SMS allow"
                 }, ok = !mirrorOn || mirrorOk) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Copy texts to Messages", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    Text(stringResource(R.string.set_mirror_switch), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                     Switch(mirrorOn, { mirrorOn = it; core.prefs.mirrorToSystem = it })
                 }
             }
             val paired = remember(tick) { core.prefs.paired }
-            Card(Icons.Filled.QrCodeScanner, "Pair with SIM phone",
-                if (paired != null) "Paired. Calls and texts are encrypted (TLS + SRTP) and only go to the SIM phone with key ${paired.fingerprint.take(8)}…"
-                else "On the SIM phone open SimBridge Gateway → Security → Pair a phone, then scan the code.",
+            Card(Icons.Filled.QrCodeScanner, stringResource(R.string.set_pair),
+                if (paired != null) stringResource(R.string.set_paired, paired.fingerprint.take(8))
+                else stringResource(R.string.set_pair_how),
                 ok = paired != null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button({ scanPairingCode(ctx) { pending = it } }) { Text(if (paired == null) "Scan code" else "Scan again") }
-                    TextButton({ pasting = !pasting }) { Text("Paste link") }
-                    if (paired != null) TextButton({ confirmUnpair = true }) { Text("Unpair") }
+                    Button({ scanPairingCode(ctx) { pending = it } }) { Text(if (paired == null) stringResource(R.string.scan_code) else stringResource(R.string.scan_again)) }
+                    TextButton({ pasting = !pasting }) { Text(stringResource(R.string.paste_link)) }
+                    if (paired != null) TextButton({ confirmUnpair = true }) { Text(stringResource(R.string.unpair)) }
                 }
                 if (pasting) {
                     OutlinedTextField(link, { link = it.trim() }, singleLine = true, label = { Text("simbridge://pair?…") },
                         modifier = Modifier.fillMaxWidth())
                     Button({ pending = PairedGateway.parse(link) ?: run {
-                        android.widget.Toast.makeText(ctx, "That isn't a SimBridge pairing link", android.widget.Toast.LENGTH_SHORT).show(); null
-                    } }, enabled = link.isNotEmpty()) { Text("Pair") }
+                        android.widget.Toast.makeText(ctx, ctx.getString(R.string.not_pair_link), android.widget.Toast.LENGTH_SHORT).show(); null
+                    } }, enabled = link.isNotEmpty()) { Text(stringResource(R.string.pair)) }
                 }
             }
             var autoRec by remember { mutableStateOf(core.prefs.autoRecord) }
-            Card(Icons.Filled.Mic, "Call recording",
-                "Tap Record in the call notification, or record every call. Files are saved on this phone in Recordings/SimBridge. " +
-                    "Recording laws differ by country: tell the other person when required.", ok = true) {
+            Card(Icons.Filled.Mic, stringResource(R.string.set_recording),
+                stringResource(R.string.set_recording_text), ok = true) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Record every call", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    Text(stringResource(R.string.set_record_all), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                     Switch(autoRec, { autoRec = it; core.prefs.autoRecord = it })
                 }
-                TextButton(onRecordings) { Text("Recordings") }
+                TextButton(onRecordings) { Text(stringResource(R.string.recordings)) }
             }
             val exportLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
                 androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -198,15 +201,57 @@ fun SettingsScreen(core: LinkCore, onSimPhone: () -> Unit = {}, onBlocked: () ->
                 android.widget.Toast.makeText(ctx, r.fold({ "Imported $it texts" }, { "Import failed: ${it.message}" }),
                     android.widget.Toast.LENGTH_LONG).show()
             }
-            Card(Icons.Filled.Sms, "Backup",
-                "Save your texts, blocked numbers and settings to a file, or bring them back on a new phone. " +
-                    "The pairing key isn't included: scan the SIM phone's code again.", ok = true) {
+            var web by remember { mutableStateOf(core.prefs.webTexts) }
+            var webCode by remember { mutableStateOf(core.web.code) }
+            Card(Icons.Filled.Computer, stringResource(R.string.set_web_title), stringResource(R.string.set_web_text), ok = true) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.set_web_switch), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    Switch(web, { on -> web = on; core.prefs.webTexts = on; if (on) { webCode = core.web.newCode(); core.web.start() } else core.web.stop() })
+                }
+                if (web) {
+                    val ip = remember { localIp() }
+                    Text("https://${ip ?: "…"}:${core.web.port}", style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.set_web_code, webCode), style = MaterialTheme.typography.bodyLarge)
+                    Text(stringResource(R.string.set_web_warning), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            var share by remember { mutableStateOf(core.prefs.shareContacts) }
+            var remote by remember { mutableStateOf(core.prefs.remoteHost) }
+            Card(Icons.Filled.Contacts, stringResource(R.string.set_more_title), stringResource(R.string.set_more_text), ok = true) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.set_share_contacts), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    Switch(share, { share = it; core.prefs.shareContacts = it; if (it) core.control.syncContacts() })
+                }
+                OutlinedTextField(remote, { remote = it.trim() }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.set_remote)) }, supportingText = { Text(stringResource(R.string.set_remote_help)) })
+                TextButton({ core.prefs.remoteHost = remote; core.reconnect() }) { Text(stringResource(R.string.save)) }
+            }
+            val latest by io.github.simbridge.UpdateCheck.latest.collectAsState()
+            var upd by remember { mutableStateOf(core.prefs.updateCheck) }
+            Card(Icons.Filled.Refresh, stringResource(R.string.set_updates),
+                latest?.let { stringResource(R.string.set_update_available, it) } ?: stringResource(R.string.set_updates_text, io.github.simbridge.BuildConfig.VERSION_NAME),
+                ok = latest == null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.set_update_daily), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    Switch(upd, { upd = it; core.prefs.updateCheck = it })
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton({ io.github.simbridge.UpdateCheck.maybeCheck(ctx, force = true) }) { Text(stringResource(R.string.set_check_now)) }
+                    if (latest != null) FilledTonalButton({
+                        runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(io.github.simbridge.UpdateCheck.RELEASES))) }
+                    }) { Text(stringResource(R.string.set_download)) }
+                }
+            }
+            Card(Icons.Filled.Sms, stringResource(R.string.set_backup),
+                stringResource(R.string.set_backup_text), ok = true) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilledTonalButton({ exportLauncher.launch("simbridge-backup-${java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())}.json") }) { Text("Export") }
                     TextButton({ importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }) { Text("Import") }
                 }
             }
-            Text("The SIM phone is found automatically on your home Wi-Fi and on its own hotspot. No addresses to enter.",
+            Text(stringResource(R.string.set_footer),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp))
         }
@@ -214,10 +259,10 @@ fun SettingsScreen(core: LinkCore, onSimPhone: () -> Unit = {}, onBlocked: () ->
     ConfirmPairing(core, pending) { pending = null; pasting = false; link = ""; tick++ }
     if (confirmUnpair) AlertDialog(
         onDismissRequest = { confirmUnpair = false },
-        title = { Text("Unpair?") },
-        text = { Text("Calls and texts stop until you scan a SIM phone's code again.") },
-        confirmButton = { TextButton({ core.unpair(); confirmUnpair = false; tick++ }) { Text("Unpair") } },
-        dismissButton = { TextButton({ confirmUnpair = false }) { Text("Cancel") } },
+        title = { Text(stringResource(R.string.unpair_q)) },
+        text = { Text(stringResource(R.string.unpair_text)) },
+        confirmButton = { TextButton({ core.unpair(); confirmUnpair = false; tick++ }) { Text(stringResource(R.string.unpair)) } },
+        dismissButton = { TextButton({ confirmUnpair = false }) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -227,28 +272,14 @@ fun ConfirmPairing(core: LinkCore, g: PairedGateway?, onDone: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDone,
         icon = { Icon(Icons.Filled.QrCodeScanner, null) },
-        title = { Text("Pair with this SIM phone?") },
-        text = { Text("Gateway ${g.id.take(6)}, key ${g.fingerprint.take(8)}…\n\nYour calls and texts will go through this phone's SIM. " +
-            "Only continue if you just scanned the code on your own SIM phone.") },
-        confirmButton = { TextButton({ core.pair(g); onDone() }) { Text("Pair") } },
-        dismissButton = { TextButton(onDone) { Text("Cancel") } },
+        title = { Text(stringResource(R.string.pair_q)) },
+        text = { Text(stringResource(R.string.pair_q_text, g.id.take(6),g.fingerprint.take(8))) },
+        confirmButton = { TextButton({ core.pair(g); onDone() }) { Text(stringResource(R.string.pair)) } },
+        dismissButton = { TextButton(onDone) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
-/** Scans the QR with Google's code scanner (no camera permission; runs in Play services). */
-fun scanPairingCode(ctx: android.content.Context, onResult: (PairedGateway) -> Unit) {
-    val opts = com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions.Builder()
-        .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE).build()
-    com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(ctx, opts).startScan()
-        .addOnSuccessListener { b ->
-            val g = b.rawValue?.let(PairedGateway::parse)
-            if (g != null) onResult(g)
-            else android.widget.Toast.makeText(ctx, "That isn't a SimBridge pairing code", android.widget.Toast.LENGTH_SHORT).show()
-        }
-        .addOnFailureListener {
-            android.widget.Toast.makeText(ctx, "Scanner unavailable: use Paste link", android.widget.Toast.LENGTH_LONG).show()
-        }
-}
+
 
 @Composable
 internal fun NavRow(icon: ImageVector, title: String, text: String, onClick: () -> Unit) {
@@ -284,3 +315,9 @@ internal fun Card(icon: ImageVector, title: String, text: String, ok: Boolean, a
         }
     }
 }
+
+/** This phone's Wi-Fi / LAN IPv4 address, for the browser link. */
+private fun localIp(): String? = runCatching {
+    java.net.NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
+        .flatMap { it.inetAddresses.toList() }.firstOrNull { it is java.net.Inet4Address && it.isSiteLocalAddress }?.hostAddress
+}.getOrNull()

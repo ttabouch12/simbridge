@@ -1,0 +1,1 @@
+New: tabs (Messages, Dashboard, Settings), a SIM phone dashboard with data used, hotspot devices, network mode, APN and find my phone; texts in a browser; carrier voicemail for unanswered calls; audio self-test; update check; 7 languages. Fixes: texts and missed-call alerts are no longer lost while the phone is away.

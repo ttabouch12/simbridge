@@ -1,0 +1,1 @@
+Relays this phone's SIM calls and texts to your main phone over Wi-Fi

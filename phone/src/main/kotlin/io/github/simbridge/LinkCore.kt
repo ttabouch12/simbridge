@@ -46,6 +46,8 @@ class LinkCore(val context: Context) {
     val contacts = Contacts(context)
     val notifier = Notifier(context, this)
     val control = PhoneControl(this)
+    /** Texts in a browser on the LAN (off unless turned on in Settings). */
+    val web by lazy { TextsWebServer(context, this) }
 
     private val _status = MutableStateFlow(LinkStatus(LinkState.SEARCHING))
     val status: StateFlow<LinkStatus> = _status
@@ -145,7 +147,7 @@ class LinkCore(val context: Context) {
             }
             _status.value = LinkStatus(LinkState.SEARCHING, detail = "Looking for your SIM phone…")
             val gw = discovery.wifiGateway()
-            for (c in discovery.candidates(pg.id, pg.tlsPort, prefs.lastHost)) {
+            for (c in discovery.candidates(pg.id, pg.tlsPort, prefs.lastHost, prefs.remoteHost)) {
                 val u = newUa(c.host, c.port, pg)
                 if (awaitReady(u, 7_000)) {
                     ua = u
@@ -209,7 +211,7 @@ class LinkCore(val context: Context) {
     ).apply {
         setIncomingCallHandler { leg -> onIncomingCall(leg) }
         incomingMessageHandler = { number, name, text, meta -> onIncomingText(number, name, text, meta.sim ?: 0); true }
-        controlHandler = { control.handle(it) }
+        controlHandler = { json, _ -> control.handle(json) }
         addStatusListener { _, _ -> kick() }
         start()
     }
@@ -339,7 +341,7 @@ class LinkCore(val context: Context) {
     /** SIM to send a text on: the line the conversation last came in on, else the chosen default. */
     fun simFor(address: String): Int {
         if ((control.status.value?.sims?.size ?: 0) < 2) return 0
-        return store.thread(MessageStore.keyOf(address)).lastOrNull { !it.outgoing && it.sim > 0 }?.sim ?: prefs.outgoingSim
+        return store.lastIncomingSim(MessageStore.keyOf(address)) ?: prefs.outgoingSim
     }
 
     fun sendText(address: String, text: String, sim: Int = simFor(address)): Long {

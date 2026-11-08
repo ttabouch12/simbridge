@@ -83,7 +83,7 @@ object MmsGateway {
                         .put("data", Base64.encodeToString(p.data, Base64.NO_WRAP)))
                 }
             })
-            if (!rt.control.send(o)) rt.control.queueBig(o)
+            rt.control.deliver(o)
             AppLog.i("MMS forwarded: ${m.media.size} file(s), ${others.size} participant(s)")
         } catch (t: Throwable) {
             AppLog.w("MMS: could not read message", t)

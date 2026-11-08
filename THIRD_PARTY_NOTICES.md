@@ -13,8 +13,8 @@ MESSAGE support, contact lookup, status alerts, power-saver profile, the new gat
 interface-aware SDP addressing, and in 2.0 the TLS/SRTP transport and pairing, HD voice, MMS codec,
 control channel, call forking, call recording and backup. These are licensed under the same terms.
 
-**SimBridge release APKs do not include the native pjsua2 stack** (the `sip-pjsua2` module is not part of
-the build). Its notices below apply only if you build that module yourself.
+The upstream native pjsua2 module was removed from this repository in 2.1.0; SimBridge has never
+shipped it. Its notices remain below for the history this repository carries.
 
 SimBridge release APKs include: Kotlin standard library and kotlinx.coroutines (Apache-2.0), AndroidX
 core / activity / Compose UI / Material 3 / Material Icons (Apache-2.0), the Shizuku API/provider

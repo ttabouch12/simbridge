@@ -234,6 +234,8 @@ class GatewayRuntime private constructor(context: Context) {
                 if (state == ShizukuConnector.State.CONNECTED && svc != null) {
                     if (pendingDialerChange?.acquire == true) attemptDialerChange()
                     runSetup()
+                    // Usage access (data used) and location (find my phone).
+                    worker.execute { runCatching { svc.remoteAction("grant-extras", "") } }
                 } else {
                     updatePrivileged(null, detail)
                 }
@@ -621,7 +623,7 @@ class GatewayRuntime private constructor(context: Context) {
             ).also { ua ->
                 ua.addStatusListener { ep, st -> sipStatus(ep, st) }
                 ua.outgoingMessageHandler = { to, text, meta -> sendSmsFromPhone(to, text, meta) }
-                ua.controlHandler = { control.handle(it) }
+                ua.controlHandler = { json, from -> worker.execute { control.handle(json, from) } }
                 ua.start()
             }
             if (s.serverMode) (ep as SipUserAgent).let { ua ->
@@ -736,9 +738,26 @@ class GatewayRuntime private constructor(context: Context) {
     /** Sessions whose call reached the main phone (it rang there); the rest are reported as missed. */
     private val reachedPhone = java.util.Collections.synchronizedSet(HashSet<Int>())
 
+    private val noAnswer = java.util.concurrent.ConcurrentHashMap<Int, Runnable>()
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
     private fun noteMissed(s: BridgeSession) {
         if (s.origin != cellular.name) return
         val st = s.outbound?.state
+        // "Voicemail": an unanswered call is rejected after N seconds, so the carrier's
+        // forwarding (busy / no answer) takes it to voicemail.
+        val sec = control.noAnswerSec
+        if (sec > 0 && st == LegState.RINGING && s.connectedAtMs == null && s.endedAtMs == null && !noAnswer.containsKey(s.id)) {
+            val r = Runnable {
+                if (s.connectedAtMs == null && s.endedAtMs == null) {
+                    AppLog.i("no answer after ${sec}s: handing the call to the carrier (voicemail)")
+                    s.inbound.hangup(io.github.sparkcyf.voicesipagent.voice.HangupCause.BUSY)
+                }
+            }
+            noAnswer[s.id] = r
+            mainHandler.postDelayed(r, sec * 1000L)
+        }
+        if (s.endedAtMs != null || s.connectedAtMs != null) noAnswer.remove(s.id)?.let { mainHandler.removeCallbacks(it) }
         if (st == LegState.RINGING || st == LegState.CONNECTED || s.connectedAtMs != null) reachedPhone += s.id
         if (s.endedAtMs == null) return
         val reached = reachedPhone.remove(s.id)
@@ -880,11 +899,12 @@ class GatewayRuntime private constructor(context: Context) {
     fun forwardSms(from: String?, text: String, subId: Int? = null) = worker.execute {
         val s = sip
         val sim = if (subId != null && Sims.dual(app)) Sims.slotForSubId(app, subId) else null
-        if (s is SipUserAgent && s.sendMessage(from, text, ContactNames.lookup(app, from), TextMeta(sim = sim))) {
-            AppLog.i("SMS forwarded to the registered phone")
-        } else {
-            AppLog.w("SMS not forwarded: no phone registered")
+        // Kept and resent on the next registration unless a phone confirms it.
+        val sent = s is SipUserAgent && s.sendMessage(from, text, ContactNames.lookup(app, from), TextMeta(sim = sim)) { ok ->
+            if (!ok) { AppLog.w("SMS not confirmed by any phone: kept for later"); control.keepSms(from, text, sim) }
         }
+        if (sent) AppLog.i("SMS forwarded to the registered phone")
+        else { AppLog.w("SMS kept: no phone registered"); control.keepSms(from, text, sim) }
     }
 
     /** Main phone -> cellular SMS through this phone's SIM. Failures come back to the main phone as an alert. */

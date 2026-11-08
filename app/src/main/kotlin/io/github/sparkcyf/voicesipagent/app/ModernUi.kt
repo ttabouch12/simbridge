@@ -85,6 +85,8 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.rememberTopAppBarState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -213,6 +215,8 @@ fun ModernScreen(rt: GatewayRuntime, setTakeover: (Boolean) -> Unit, openAdvance
                         quiet, 2, rt::setQuietFlags)
                     QuietRow(Icons.Rounded.MobileOff, "Keep the screen off", "No Always On Display, lift/tap to wake or notification wake-ups",
                         quiet, 4, rt::setQuietFlags)
+                    QuietRow(Icons.Rounded.MobileOff, "OLED saver", "Black & white, dark theme, 60 Hz and a lower resolution",
+                        quiet, 8, rt::setQuietFlags)
                     SwitchRow(Icons.Rounded.VolumeOff, "Keep this phone silent during calls",
                         "The call is heard only on the main phone", cur.muteEarpiece, { rt.setMuteEarpiece(it) })
                 }
@@ -343,6 +347,7 @@ private fun SecurityCard(rt: GatewayRuntime, current: String) {
     var qrPassword by remember { mutableStateOf("") }
     var confirmReset by remember { mutableStateOf(false) }
     var legacy by remember { mutableStateOf(rt.pairing.legacyUdp) }
+    var sipApp by remember { mutableStateOf<SipAppProvisioning.Account?>(null) }
     val fp = remember(current) { runCatching { rt.pairing.fingerprint() }.getOrDefault("") }
     GroupCard("Security") {
         val ok = current.isNotEmpty()
@@ -359,6 +364,10 @@ private fun SecurityCard(rt: GatewayRuntime, current: String) {
                 showQr = true
             }) { Icon(Icons.Rounded.QrCode2, null); Spacer(Modifier.width(8.dp)); Text("Pair a phone") }
             TextButton(onClick = { confirmReset = true }) { Text("New key") }
+        }
+        TextButton(onClick = { sipApp = SipAppProvisioning.start(rt, lanAddress() ?: "this phone's IP") },
+            enabled = current.isNotEmpty(), modifier = Modifier.padding(horizontal = 12.dp)) {
+            Text("Use another SIP app (iPhone, computer)")
         }
         ListItem(
             modifier = Modifier.clickable { legacy = !legacy; rt.setLegacyUdp(legacy) },
@@ -386,6 +395,29 @@ private fun SecurityCard(rt: GatewayRuntime, current: String) {
             },
             confirmButton = { TextButton({ showQr = false }) { Text("Done") } },
             dismissButton = { TextButton({ copy(ctx, uri); Toast.makeText(ctx, "Pairing link copied", Toast.LENGTH_SHORT).show() }) { Text("Copy link") } },
+        )
+    }
+    sipApp?.let { a ->
+        val bmp = remember(a.url) { qrBitmap(a.url, 720) }
+        AlertDialog(
+            onDismissRequest = { sipApp = null },
+            title = { Text("Another SIP app") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Linphone (iPhone, Android, Mac, Windows, Linux): Settings → Assistant → Fetch remote configuration → scan this code. It works once, for 10 minutes.",
+                        style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(8.dp))
+                    Image(bmp.asImageBitmap(), "Linphone setup code", Modifier.size(220.dp).clip(RoundedCornerShape(12.dp)))
+                    Spacer(Modifier.height(8.dp))
+                    Text("Other apps (Acrobits, Zoiper, …):\nServer ${a.host}:${a.port} · transport TLS\nUser ${a.user} · password ${a.password}\n" +
+                        "Media encryption SRTP (SDES), required · don't verify the server certificate",
+                        style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(8.dp))
+                    Text("iPhone apps are paused in the background, so incoming calls only ring while the app is open, unless the app has its own push service.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = { TextButton({ sipApp = null }) { Text("Done") } },
         )
     }
     if (confirmReset) AlertDialog(
@@ -426,6 +458,14 @@ private fun MmsCard(rt: GatewayRuntime) {
         }
     }
 }
+
+/** This phone's address on Wi-Fi or its hotspot (what other devices on the LAN reach). */
+private fun lanAddress(): String? = runCatching {
+    java.net.NetworkInterface.getNetworkInterfaces().toList()
+        .filter { it.isUp && !it.isLoopback && listOf("rmnet", "ccmni", "dummy", "v4-").none { p -> it.name.startsWith(p) } }
+        .flatMap { it.inetAddresses.toList() }
+        .firstOrNull { it is java.net.Inet4Address && it.isSiteLocalAddress }?.hostAddress
+}.getOrNull()
 
 private fun qrBitmap(text: String, size: Int): Bitmap {
     val m = com.google.zxing.qrcode.QRCodeWriter().encode(text, com.google.zxing.BarcodeFormat.QR_CODE, size, size,

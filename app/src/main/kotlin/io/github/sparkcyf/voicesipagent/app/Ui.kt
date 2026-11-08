@@ -108,21 +108,6 @@ fun helpText(key: String, lang: UiLang): Pair<String, String>? {
             "Сколько секунд держать регистрацию софтфона. Софтфон обновляет её примерно раз в половину этого времени. Больше значение — реже обновления, устойчивее к «засыпанию» софтфона в фоне. Адрес удерживается ещё примерно вдвое дольше, прежде чем шлюз решит, что телефон пропал. По умолчанию 600 с.\n\nЕсли регистрация у тебя «протухает» — увеличь это значение (например, 1200) и убери ограничения батареи у софтфона.",
             "How many seconds to keep the softphone's registration. The softphone refreshes it about every half of this. Larger = fewer refreshes, more tolerant of the softphone sleeping in the background. The contact is held for about twice this before the gateway gives up. Default 600 s.\n\nIf your registration keeps expiring, raise this (e.g. 1200) and lift battery limits on the softphone.",
         )
-        "sip_stack" -> p(
-            "SIP-стек", "SIP stack",
-            "builtin — встроенный лёгкий стек (только UDP и кодек G.711, узкополосный звук), ничего доустанавливать не нужно. pjsua2 — нативный стек (TCP/TLS, кодек Opus), в этой сборке не включён.",
-            "builtin — the lightweight built-in stack (UDP only, G.711 codec, narrowband), nothing to install. pjsua2 — native stack (TCP/TLS, Opus), not enabled in this build.",
-        )
-        "transport" -> p(
-            "Транспорт", "Transport",
-            "Протокол для SIP. Со встроенным стеком доступен только UDP. TCP и TLS — только с pjsua2.",
-            "Transport protocol for SIP. With the built-in stack only UDP is available. TCP and TLS need pjsua2.",
-        )
-        "srtp" -> p(
-            "Шифрование медиа (SRTP)", "Media encryption (SRTP)",
-            "Шифрование голоса. Работает только при транспорте TLS (pjsua2). off — выкл, optional — если поддерживается, mandatory — обязательно.",
-            "Voice encryption. Works only with TLS transport (pjsua2). off, optional (if supported), mandatory.",
-        )
         "pbx" -> p(
             "Внешняя АТС (PBX)", "External PBX",
             "Нужны только если «Режим устройство в себе» выключен. PBX host — адрес сервера; user/password — логин на нём; SIP domain — домен, если отличается от адреса.",

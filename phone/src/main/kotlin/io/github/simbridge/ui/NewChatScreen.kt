@@ -1,5 +1,7 @@
 package io.github.simbridge.ui
 
+import io.github.simbridge.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -63,16 +65,16 @@ fun NewChatScreen(core: LinkCore, onBack: () -> Unit, onPick: (String, String) -
     }
     Scaffold(topBar = {
         TopAppBar(
-            navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
-            title = { Text("New conversation") },
+            navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
+            title = { Text(stringResource(R.string.new_conv)) },
         )
     }) { pad ->
         Column(Modifier.fillMaxSize().padding(top = pad.calculateTopPadding())) {
             Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("To", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.to), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextField(
                     value = q, onValueChange = { q = it }, singleLine = true,
-                    placeholder = { Text("Name or number (commas for a group)") },
+                    placeholder = { Text(stringResource(R.string.new_hint)) },
                     keyboardOptions = KeyboardOptions(keyboardType = if (dialpad) KeyboardType.Phone else KeyboardType.Text),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
@@ -80,7 +82,7 @@ fun NewChatScreen(core: LinkCore, onBack: () -> Unit, onPick: (String, String) -
                     modifier = Modifier.weight(1f).focusRequester(focus),
                 )
                 IconButton({ dialpad = !dialpad }) {
-                    Icon(if (dialpad) Icons.Filled.Keyboard else Icons.Filled.Dialpad, "Switch keyboard")
+                    Icon(if (dialpad) Icons.Filled.Keyboard else Icons.Filled.Dialpad, stringResource(R.string.switch_keyboard))
                 }
             }
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = pad.calculateBottomPadding() + 16.dp)) {
@@ -88,12 +90,12 @@ fun NewChatScreen(core: LinkCore, onBack: () -> Unit, onPick: (String, String) -
                 val several = q.split(',', ';').map { s -> s.filter { it.isDigit() || it == '+' } }.filter { it.length >= 3 }
                 if (several.size > 1) item {
                     val g = io.github.simbridge.Group.address(several)
-                    PickRow("New group", several.joinToString(", "), null) { onPick(MessageStore.keyOf(g), g) }
+                    PickRow(stringResource(R.string.new_group), several.joinToString(", "), null) { onPick(MessageStore.keyOf(g), g) }
                 } else if (digits.length >= 3) item {
                     PickRow(digits, "Send to $digits", null) { onPick(MessageStore.keyOf(digits), digits) }
                 }
                 if (!core.contacts.allowed()) item {
-                    Text("Allow contacts access to pick from your contacts.", Modifier.padding(16.dp),
+                    Text(stringResource(R.string.contacts_needed), Modifier.padding(16.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 items(shown, key = { it.name + it.number }) { c ->

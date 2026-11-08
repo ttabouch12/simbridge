@@ -76,16 +76,37 @@ class Prefs(context: Context) {
         get() = p.getStringSet("blocked", emptySet()).orEmpty().toSortedSet()
         set(v) = p.edit().putStringSet("blocked", v.toSet()).apply()
 
+    /** The SIM phone's VPN address for use away from home (Tailscale/WireGuard), or blank. */
+    var remoteHost: String
+        get() = p.getString("remote_host", "") ?: ""
+        set(v) = p.edit().putString("remote_host", v.trim()).apply()
+
+    /** Texts in a browser on the local network (TextsWebServer). */
+    var webTexts: Boolean
+        get() = p.getBoolean("web_texts", false)
+        set(v) = p.edit().putBoolean("web_texts", v).apply()
+
+    /** Check GitHub once a day for a newer release. */
+    var updateCheck: Boolean
+        get() = p.getBoolean("update_check", BuildConfig.UPDATE_CHECK_DEFAULT)
+        set(v) = p.edit().putBoolean("update_check", v).apply()
+
+    /** Send contact names to the SIM phone so it can show who's calling. */
+    var shareContacts: Boolean
+        get() = p.getBoolean("share_contacts", true)
+        set(v) = p.edit().putBoolean("share_contacts", v).putInt("contacts_hash", 0).apply()
+
+    var contactsHash: Int
+        get() = p.getInt("contacts_hash", 0)
+        set(v) = p.edit().putInt("contacts_hash", v).apply()
+
     /** Also refuse calls with no caller ID. */
     var blockHidden: Boolean
         get() = p.getBoolean("block_hidden", false)
         set(v) = p.edit().putBoolean("block_hidden", v).apply()
 
     fun isBlocked(number: String?): Boolean {
-        val d = number?.filter(Char::isDigit).orEmpty()
-        if (d.length < 3) return false
-        return blocked.any { b -> val e = b.filter(Char::isDigit); val k = minOf(9, d.length, e.length)
-            k >= 3 && d.takeLast(k) == e.takeLast(k) && (k >= 9 || d.length == e.length) }
+        return blocked.any { io.github.sparkcyf.voicesipagent.voice.PhoneNumbers.same(number, it) }
     }
 
     private fun key(): SecretKey {

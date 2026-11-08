@@ -69,6 +69,7 @@ class CallAudio {
             repeat(2) { track.write(zero, 0, n) }
             var upPeak = 0; var downPeak = 0; var frames = 0
             val silenced = runCatching { rec.activeRecordingConfiguration?.isClientSilenced }.getOrNull()
+            AudioMeter.rate = rate
             Log.i("audio: started ${rate}Hz, aec=${effects.size}, micSilenced=$silenced")
             while (running) {
                 var got = 0
@@ -89,6 +90,8 @@ class CallAudio {
                 } else {
                     for (s in up) upPeak = maxOf(upPeak, abs(s.toInt()))
                     for (s in down) downPeak = maxOf(downPeak, abs(s.toInt()))
+                    if (downPeak > AudioMeter.downMax) AudioMeter.downMax = downPeak
+                    if (upPeak > AudioMeter.upMax) AudioMeter.upMax = upPeak
                 }
             }
         } catch (t: Throwable) {
@@ -100,4 +103,12 @@ class CallAudio {
             Log.i("audio: stopped")
         }
     }
+}
+
+/** Loudest samples heard in the current call (for the audio self-test). */
+object AudioMeter {
+    @Volatile var downMax = 0
+    @Volatile var upMax = 0
+    @Volatile var rate = 0
+    fun reset() { downMax = 0; upMax = 0 }
 }

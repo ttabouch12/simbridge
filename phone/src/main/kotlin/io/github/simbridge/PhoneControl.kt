@@ -12,7 +12,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** One SIM card on the SIM phone, as reported by its dashboard. */
-data class SimInfo(val slot: Int, val name: String, val carrier: String, val level: Int, val dbm: Int, val network: String, val roaming: Boolean)
+data class SimInfo(val slot: Int, val name: String, val carrier: String, val level: Int, val dbm: Int, val network: String,
+                   val roaming: Boolean, val number: String = "", val esim: Boolean = false, val mode: String = "")
+
+data class HotspotClient(val ip: String, val mac: String, val simbridge: Boolean)
+data class Apn(val id: Long, val name: String, val apn: String, val type: String, val preferred: Boolean)
+data class GatewayLocation(val ok: Boolean, val lat: Double, val lon: Double, val accuracy: Double, val at: Long)
 
 data class GatewayStatus(
     val at: Long,
@@ -24,6 +29,14 @@ data class GatewayStatus(
     val uptimeMin: Long,
     val version: String,
     val sims: List<SimInfo>,
+    val model: String = "",
+    val androidVersion: String = "",
+    val dataToday: Long? = null,
+    val dataMonth: Long? = null,
+    val clients: List<HotspotClient> = emptyList(),
+    val smsApp: Boolean = false,
+    val noAnswerSec: Int = 0,
+    val voicemail: String = "",
 ) {
     companion object {
         fun parse(o: JSONObject) = GatewayStatus(
@@ -38,9 +51,20 @@ data class GatewayStatus(
             sims = (o.optJSONArray("sims") ?: JSONArray()).let { a ->
                 (0 until a.length()).map { i -> a.getJSONObject(i).let { s ->
                     SimInfo(s.optInt("slot", i + 1), s.optString("name"), s.optString("carrier"), s.optInt("level", -1),
-                        s.optInt("dbm"), s.optString("network"), s.optBoolean("roaming"))
+                        s.optInt("dbm"), s.optString("network"), s.optBoolean("roaming"), s.optString("number"),
+                        s.optBoolean("esim"), s.optString("mode"))
                 } }
             },
+            model = o.optString("model"),
+            androidVersion = o.optString("android"),
+            dataToday = if (o.has("dataToday")) o.optLong("dataToday") else null,
+            dataMonth = if (o.has("dataMonth")) o.optLong("dataMonth") else null,
+            clients = (o.optJSONArray("clients") ?: JSONArray()).let { a ->
+                (0 until a.length()).map { i -> a.getJSONObject(i).let { HotspotClient(it.optString("ip"), it.optString("mac"), it.optBoolean("simbridge")) } }
+            },
+            smsApp = o.optBoolean("smsApp"),
+            noAnswerSec = o.optInt("noAnswerSec"),
+            voicemail = o.optString("voicemail"),
         )
     }
 }
@@ -58,6 +82,10 @@ class PhoneControl(private val core: LinkCore) {
     val status: StateFlow<GatewayStatus?> = _status
     private val _ussd = MutableStateFlow<UssdReply?>(null)
     val ussd: StateFlow<UssdReply?> = _ussd
+    private val _apns = MutableStateFlow<List<Apn>?>(null)
+    val apns: StateFlow<List<Apn>?> = _apns
+    private val _location = MutableStateFlow<GatewayLocation?>(null)
+    val location: StateFlow<GatewayLocation?> = _location
     private val _notice = MutableStateFlow<String?>(null)
     /** One-off text for the UI (a failed remote switch). */
     val notice: StateFlow<String?> = _notice
@@ -79,6 +107,13 @@ class PhoneControl(private val core: LinkCore) {
             "sms-status" -> smsStatus(o.optString("ref"), o.optString("status"))
             "missed", "blocked" -> callEvent(o)
             "mms" -> core.onIncomingMms(o)
+            "apns" -> _apns.value = (o.optJSONArray("list") ?: JSONArray()).let { a ->
+                (0 until a.length()).map { i -> a.getJSONObject(i).let {
+                    Apn(it.optLong("id"), it.optString("name"), it.optString("apn"), it.optString("type"), it.optBoolean("preferred"))
+                } }
+            }
+            "location" -> _location.value = GatewayLocation(o.optBoolean("ok"), o.optDouble("lat"), o.optDouble("lon"),
+                o.optDouble("acc"), o.optLong("at", System.currentTimeMillis()))
         }
     }
 
@@ -99,6 +134,58 @@ class PhoneControl(private val core: LinkCore) {
     fun sendMms(to: List<String>, text: String, parts: JSONArray, ref: String, sim: Int): Boolean =
         send(JSONObject().put("op", "mms-send").put("to", JSONArray(to)).put("text", text).put("parts", parts).put("ref", ref)
             .apply { if (sim > 0) put("sim", sim) })
+
+    fun networkMode(sim: Int, mode: String) = send(JSONObject().put("op", "network-mode").put("sim", sim).put("mode", mode))
+    fun loadApns() = send(JSONObject().put("op", "apn-list"))
+    fun selectApn(id: Long) = send(JSONObject().put("op", "apn-select").put("id", id))
+    fun addApn(name: String, apn: String, mcc: String, mnc: String, user: String, password: String) =
+        send(JSONObject().put("op", "apn-add").put("name", name).put("apn", apn).put("mcc", mcc).put("mnc", mnc)
+            .put("user", user).put("password", password))
+    fun setNoAnswer(seconds: Int) = send(JSONObject().put("op", "voicemail").put("seconds", seconds))
+
+    private val _audioTest = MutableStateFlow<String?>(null)
+    /** Result of the last audio self-test, in plain words. */
+    val audioTest: StateFlow<String?> = _audioTest
+
+    /**
+     * "Does it work on my phone?": calls [number] (the voicemail by default) through the SIM
+     * phone, listens for 12 seconds, hangs up and reports whether network audio came through.
+     */
+    fun runAudioTest(number: String) {
+        _audioTest.value = "…"
+        AudioMeter.reset()
+        val tm = ctx.getSystemService(android.telecom.TelecomManager::class.java)
+        runCatching {
+            tm.placeCall(android.net.Uri.fromParts("tel", number, null), android.os.Bundle().apply {
+                putParcelable(android.telecom.TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, Telecom.handle(ctx))
+            })
+        }.onFailure { _audioTest.value = "Couldn't place the call: ${it.message}"; return }
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            ActiveCall.current?.onDisconnect()
+            val down = AudioMeter.downMax; val up = AudioMeter.upMax
+            val g = status.value
+            _audioTest.value = when {
+                down > 1500 -> "✅ Works: network audio came through (level $down, ${AudioMeter.rate / 1000} kHz)."
+                down > 0 -> "⚠️ Very quiet audio (level $down). Try another Cellular audio method on the SIM phone."
+                else -> "❌ No audio from the network. On the SIM phone: ⚙ → Cellular audio → try another method."
+            } + " Mic level $up." + (g?.let { "\n${it.model}, Android ${it.androidVersion}, Gateway ${it.version}" } ?: "")
+        }, 15_000)
+    }
+
+    fun locate(): Boolean { _location.value = null; return send(JSONObject().put("op", "locate")) }
+
+    /** Contact names for caller ID on the SIM phone; sent when they changed. */
+    fun syncContacts() {
+        if (!core.prefs.shareContacts) return
+        Thread {
+            val list = core.contacts.all()
+            val hash = list.hashCode()
+            if (hash == core.prefs.contactsHash) return@Thread
+            val a = JSONArray()
+            list.forEach { a.put(JSONObject().put("n", it.number).put("name", it.name)) }
+            if (send(JSONObject().put("op", "contacts").put("list", a))) core.prefs.contactsHash = hash
+        }.start()
+    }
 
     fun control(action: String, on: Boolean) = send(JSONObject().put("op", "control").put("action", action).put("on", on))
 
@@ -122,6 +209,7 @@ class PhoneControl(private val core: LinkCore) {
     fun onConnected() {
         pushBlockRules()
         refresh()
+        syncContacts()
     }
 
     private fun smsStatus(ref: String, status: String) {

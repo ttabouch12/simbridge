@@ -101,7 +101,7 @@ class Discovery(private val context: Context, private val onChange: () -> Unit) 
      * Wi-Fi gateway address (the SIM phone when we're on its hotspot), then the last address
      * that worked. Gateways announcing a different id are skipped. TLS pinning stops impostors.
      */
-    fun candidates(id: String, tlsPort: Int, lastHost: String?): List<Candidate> {
+    fun candidates(id: String, tlsPort: Int, lastHost: String?, remoteHost: String? = null): List<Candidate> {
         val out = LinkedHashMap<String, Candidate>()
         found.entries.filter { it.value.id == id }.sortedByDescending { it.value.at }
             .forEach { out.putIfAbsent(it.key, Candidate(it.key, it.value.tlsPort, "mdns")) }
@@ -109,6 +109,8 @@ class Discovery(private val context: Context, private val onChange: () -> Unit) 
         // Where it answered last time beats the Wi-Fi router (which is only right on the hotspot).
         lastHost?.takeIf { it !in others }?.let { out.putIfAbsent(it, Candidate(it, tlsPort, "last")) }
         wifiGateway()?.takeIf { it !in others }?.let { out.putIfAbsent(it, Candidate(it, tlsPort, "gateway")) }
+        // Away from home: the SIM phone's VPN address (Tailscale / WireGuard), set by the user.
+        remoteHost?.takeIf { it.isNotBlank() }?.let { out.putIfAbsent(it, Candidate(it, tlsPort, "remote")) }
         return out.values.toList()
     }
 

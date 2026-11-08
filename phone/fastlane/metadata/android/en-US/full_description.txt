@@ -1,0 +1,10 @@
+<p>SimBridge lets a phone <b>without a SIM</b> make and receive calls and texts through a second Android phone that holds the SIM (running <i>SimBridge Gateway</i>), over your Wi-Fi or the SIM phone's hotspot. No root, no server, no cloud.</p>
+<ul>
+<li>Calls ring in the system Phone app (call screen, history, keypad), with HD voice.</li>
+<li>Texts, picture messages and group chats, with delivery reports.</li>
+<li>Encrypted link (TLS + SRTP), paired with a QR code.</li>
+<li>Dashboard of the SIM phone: signal, battery, data used, hotspot devices, USSD codes, network mode, APN, find my phone, remote switches.</li>
+<li>Missed calls while offline, call blocking, call recording, dual SIM, several main phones, Wear OS / Android Auto, backup.</li>
+<li>Texts in a browser on your computer.</li>
+</ul>
+<p>Needs SimBridge Gateway and Shizuku on the SIM phone. See the README for setup.</p>

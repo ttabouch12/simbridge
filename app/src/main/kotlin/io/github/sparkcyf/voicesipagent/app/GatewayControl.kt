@@ -32,49 +32,88 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
 
     // ------------------------------------------------------------ incoming from the phone
 
-    fun handle(json: String) {
+    fun handle(json: String, from: java.net.InetSocketAddress? = null) {
         val o = runCatching { JSONObject(json) }.getOrNull() ?: return
         when (o.optString("op")) {
-            "status" -> send(status())
-            "ussd" -> ussd(o.optString("code"), o.optInt("sim", 0).takeIf { it > 0 })
-            "control" -> control(o.optString("action"), o.optBoolean("on", true))
+            "status" -> send(status(), from)
+            "ussd" -> ussd(o.optString("code"), o.optInt("sim", 0).takeIf { it > 0 }, from)
+            "control" -> control(o.optString("action"), o.optBoolean("on", true), from)
             "block-rules" -> saveRules(o)
             "mms-send" -> MmsGateway.sendFromPhone(app, o) { st, detail -> o.optString("ref").ifBlank { null }?.let { smsStatus(it, st, detail) } }
             "sms-app" -> smsApp(o.optBoolean("on", true))
+            "network-mode" -> {
+                val slot = o.optInt("sim", 1)
+                privileged("network-mode", "${slot - 1}:${o.optString("mode")}")
+                main.postDelayed({ send(status(), from) }, 3000)
+            }
+            "apn-list" -> send(apns(), from)
+            "apn-select" -> { privileged("apn-select", o.optLong("id").toString()); send(apns(), from) }
+            "apn-add" -> {
+                val f = listOf("name", "apn", "mcc", "mnc", "type", "user", "password").joinToString("|") { o.optString(it).replace("|", "") }
+                privileged("apn-add", f); send(apns(), from)
+            }
+            "locate" -> locate(from)
+            "voicemail" -> { prefs.edit().putInt("no_answer_sec", o.optInt("seconds").coerceIn(0, 120)).apply(); send(status(), from) }
+            "contacts" -> ContactNames.importFromPhone(app, o.optJSONArray("list"))
             else -> AppLog.w("control: unknown op ${o.optString("op").take(20)}")
         }
     }
 
-    fun send(o: JSONObject): Boolean = rt.sipAgent?.sendControl(o.toString()) == true
+    /** A reply (best effort), to the phone that asked when [to] is known. */
+    fun send(o: JSONObject, to: java.net.InetSocketAddress? = null): Boolean = rt.sipAgent?.sendControl(o.toString(), to) == true
+
+    /**
+     * An event that must not be lost: sent now if a phone confirms it (2xx), otherwise kept and
+     * sent again when a phone registers. Big ones (MMS) wait as files.
+     */
+    fun deliver(o: JSONObject) {
+        val big = o.toString().length > 32_000
+        val ok = rt.sipAgent?.sendControl(o.toString()) { code -> if (code !in 200..299) keep(o, big) } == true
+        if (!ok) keep(o, big)
+    }
+
+    /** A relayed text that no phone confirmed. */
+    fun keepSms(from: String?, text: String, sim: Int?) =
+        keep(JSONObject().put("op", "__sms").put("from", from ?: "").put("text", text).apply { sim?.let { put("sim", it) } }, false)
+
+    private fun keep(o: JSONObject, big: Boolean) {
+        if (big) { queueBig(o); return }
+        synchronized(this) {
+            val q = runCatching { JSONArray(prefs.getString("queue", "[]")) }.getOrDefault(JSONArray())
+            q.put(o.put("qid", System.nanoTime()))
+            while (q.length() > 200) q.remove(0)
+            prefs.edit().putString("queue", q.toString()).apply()
+        }
+    }
+
+    @Synchronized private fun unqueue(qid: Long) {
+        val q = runCatching { JSONArray(prefs.getString("queue", "[]")) }.getOrDefault(JSONArray())
+        val left = JSONArray()
+        for (i in 0 until q.length()) q.getJSONObject(i).let { if (it.optLong("qid") != qid) left.put(it) }
+        prefs.edit().putString("queue", left.toString()).apply()
+    }
 
     // ------------------------------------------------------------ events to the phone
 
-    /** Missed / blocked call while the main phone could not be reached (or by rule). Queued if offline. */
+    /** Missed / blocked call while the main phone could not be reached (or by rule). */
     fun callEvent(kind: String, number: String?, sim: Int?) {
         val o = JSONObject().put("op", kind).put("from", number ?: "").put("at", System.currentTimeMillis())
         sim?.let { o.put("sim", it) }
         ContactNames.lookup(app, number)?.let { o.put("name", it) }
-        if (!send(o)) enqueue(o)
-        AppLog.i("control: $kind call from ${redactNumber(number)}${if (rt.sipAgent?.status?.ready == true) "" else " (queued)"}")
+        deliver(o)
+        AppLog.i("control: $kind call from ${redactNumber(number)}")
     }
 
     fun smsStatus(ref: String, status: String, detail: String? = null) {
         val o = JSONObject().put("op", "sms-status").put("ref", ref).put("status", status)
         detail?.let { o.put("detail", it) }
-        if (!send(o)) enqueue(o)
-    }
-
-    @Synchronized private fun enqueue(o: JSONObject) {
-        val q = runCatching { JSONArray(prefs.getString("queue", "[]")) }.getOrDefault(JSONArray())
-        q.put(o)
-        while (q.length() > 50) q.remove(0)
-        prefs.edit().putString("queue", q.toString()).apply()
+        deliver(o)
     }
 
     /** Large events (MMS) wait as files rather than in preferences. */
     fun queueBig(o: JSONObject) {
         val d = java.io.File(app.filesDir, "outbox").apply { mkdirs() }
-        java.io.File(d, "${System.currentTimeMillis()}.json").writeText(o.toString())
+        java.io.File(d, "${System.currentTimeMillis()}-${System.nanoTime() % 1000}.json").writeText(o.toString())
         d.listFiles()?.sortedBy { it.name }?.dropLast(30)?.forEach { it.delete() }
     }
 
@@ -86,22 +125,34 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
         val target = if (on) {
             if (current.isNotEmpty() && current != app.packageName) prefs.edit().putString("prev_sms_app", current).apply()
             app.packageName
-        } else prefs.getString("prev_sms_app", null) ?: "com.samsung.android.messaging"
+        } else prefs.getString("prev_sms_app", null) ?: "com.google.android.apps.messaging"
         AppLog.i("control: SMS app -> ${runCatching { svc.remoteAction("sms-role", target) }.getOrElse { "error: ${it.message}" }}")
     }
 
-    /** Called when a phone registers. */
-    @Synchronized fun flush() {
-        java.io.File(app.filesDir, "outbox").listFiles()?.sortedBy { it.name }?.forEach { f ->
-            val o = runCatching { JSONObject(f.readText()) }.getOrNull()
-            if (o == null || send(o)) f.delete() else return@forEach
+    /** Called when a phone registers: resend everything no phone has confirmed yet. */
+    fun flush() {
+        val ua = rt.sipAgent ?: return
+        val q = synchronized(this) { runCatching { JSONArray(prefs.getString("queue", "[]")) }.getOrDefault(JSONArray()) }
+        for (i in 0 until q.length()) {
+            val o = q.getJSONObject(i)
+            val qid = o.optLong("qid")
+            if (o.optString("op") == "__sms") {
+                val from = o.optString("from").ifBlank { null }
+                ua.sendMessage(from, o.optString("text"), ContactNames.lookup(app, from),
+                    io.github.sparkcyf.voicesipagent.sip.TextMeta(sim = o.optInt("sim", 0).takeIf { it > 0 })) { ok -> if (ok) unqueue(qid) }
+            } else {
+                val body = JSONObject(o.toString()).apply { remove("qid") }.toString()
+                ua.sendControl(body) { code -> if (code in 200..299) unqueue(qid) }
+            }
         }
-        val q = runCatching { JSONArray(prefs.getString("queue", "[]")) }.getOrDefault(JSONArray())
-        if (q.length() == 0) return
-        val left = JSONArray()
-        for (i in 0 until q.length()) { val o = q.getJSONObject(i); if (!send(o)) left.put(o) }
-        prefs.edit().putString("queue", left.toString()).apply()
+        java.io.File(app.filesDir, "outbox").listFiles()?.sortedBy { it.name }?.forEach { f ->
+            val body = runCatching { f.readText() }.getOrNull() ?: return@forEach
+            ua.sendControl(body) { code -> if (code in 200..299) f.delete() }
+        }
     }
+
+    /** Seconds an unanswered call rings before it goes to the carrier's voicemail (0 = off). */
+    val noAnswerSec: Int get() = prefs.getInt("no_answer_sec", 0)
 
     // ------------------------------------------------------------ call blocking
 
@@ -118,18 +169,12 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
         val n = normalize(number)
         if (n == null) return prefs.getBoolean("block_hidden", false)
         val list = runCatching { JSONArray(prefs.getString("blocked", "[]")) }.getOrDefault(JSONArray())
-        for (i in 0 until list.length()) if (sameNumber(n, list.getString(i))) return true
+        for (i in 0 until list.length()) if (io.github.sparkcyf.voicesipagent.voice.PhoneNumbers.same(n, list.getString(i))) return true
         return false
     }
 
     private fun normalize(n: String?): String? = n?.filter { it.isDigit() || it == '+' }?.takeIf { it.count(Char::isDigit) >= 3 }
 
-    /** Compares the last 9 digits so "+90 555…" matches "0555…". */
-    private fun sameNumber(a: String, b: String): Boolean {
-        val da = a.filter(Char::isDigit); val db = b.filter(Char::isDigit)
-        val k = minOf(9, da.length, db.length)
-        return k >= 3 && da.takeLast(k) == db.takeLast(k) && (k >= 9 || da.length == db.length)
-    }
 
     // ------------------------------------------------------------ dashboard
 
@@ -142,6 +187,12 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
         o.put("version", runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull() ?: "")
         o.put("hotspot", hotspotOn())
         o.put("smsApp", MmsGateway.isDefaultSmsApp(app))
+        o.put("noAnswerSec", noAnswerSec)
+        if (hasPhoneState()) runCatching { app.getSystemService(TelephonyManager::class.java).voiceMailNumber }.getOrNull()?.let { o.put("voicemail", it) }
+        o.put("model", "${android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${android.os.Build.MODEL}")
+        o.put("android", android.os.Build.VERSION.RELEASE)
+        dataUsage()?.let { (today, month) -> o.put("dataToday", today).put("dataMonth", month) }
+        o.put("clients", hotspotClients())
         val tm = app.getSystemService(TelephonyManager::class.java)
         o.put("dataOn", runCatching { tm.isDataEnabled }.getOrDefault(false))
         o.put("sims", JSONArray().apply { Sims.list(app).forEach { s ->
@@ -152,9 +203,83 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
                 .put("level", sig?.level ?: -1)
                 .put("dbm", sig?.cellSignalStrengths?.firstOrNull()?.dbm ?: 0)
                 .put("network", if (hasPhoneState()) networkName(runCatching { t.dataNetworkType }.getOrDefault(0)) else "")
-                .put("roaming", runCatching { t.isNetworkRoaming }.getOrDefault(false)))
+                .put("roaming", runCatching { t.isNetworkRoaming }.getOrDefault(false))
+                .put("number", runCatching { app.getSystemService(SubscriptionManager::class.java).getPhoneNumber(s.subId) }.getOrNull() ?: "")
+                .put("esim", s.esim)
+                .put("mode", rt.shizuku.service?.let { svc -> runCatching { svc.remoteAction("network-mode-get", "${s.slot - 1}") }.getOrNull() } ?: ""))
         } })
         return o
+    }
+
+    /** Mobile data used today and this month (bytes), or null without usage access. */
+    private fun dataUsage(): Pair<Long, Long>? = runCatching {
+        val nsm = app.getSystemService(android.app.usage.NetworkStatsManager::class.java)
+        val now = System.currentTimeMillis()
+        val cal = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val day = cal.timeInMillis
+        cal.set(java.util.Calendar.DAY_OF_MONTH, 1)
+        fun used(from: Long) = nsm.querySummaryForDevice(android.net.ConnectivityManager.TYPE_MOBILE, null, from, now)
+            .let { it.rxBytes + it.txBytes }
+        used(day) to used(cal.timeInMillis)
+    }.getOrNull()
+
+    /** Devices on this phone's hotspot (IP, short MAC), marking the paired main phones. */
+    private fun hotspotClients(): JSONArray {
+        val out = JSONArray()
+        val raw = runCatching { rt.shizuku.service?.remoteAction("hotspot-clients", "") }.getOrNull().orEmpty()
+        raw.lineSequence().filter { it.isNotBlank() }.forEach { l ->
+            val ip = l.substringBefore(' ')
+            val mac = Regex("lladdr ([0-9a-f:]{17})").find(l)?.groupValues?.get(1) ?: ""
+            out.put(JSONObject().put("ip", ip).put("mac", mac.takeLast(5))
+                .put("simbridge", rt.sipAgent?.isRegisteredAddress(ip) == true))
+        }
+        return out
+    }
+
+    /** APNs of the active SIM: [{id,name,apn,type,current}] and the preferred one. */
+    private fun apns(): JSONObject {
+        val svc = rt.shizuku.service
+        val rows = runCatching { svc?.remoteAction("apn-list", "") }.getOrNull().orEmpty()
+        val pref = runCatching { svc?.remoteAction("apn-preferred", "") }.getOrNull().orEmpty()
+        val prefId = Regex("_id=(\\d+)").find(pref)?.groupValues?.get(1)?.toLongOrNull()
+        fun field(row: String, k: String) = Regex("(?:^|, )$k=([^,]*)").find(row)?.groupValues?.get(1)?.trim().orEmpty()
+        val list = JSONArray()
+        rows.lineSequence().filter { it.startsWith("Row:") }.forEach { r ->
+            val id = field(r, "_id").toLongOrNull() ?: return@forEach
+            list.put(JSONObject().put("id", id).put("name", field(r, "name")).put("apn", field(r, "apn"))
+                .put("type", field(r, "type")).put("preferred", id == prefId))
+        }
+        return JSONObject().put("op", "apns").put("list", list).put("ok", svc != null)
+    }
+
+    /** "Find my SIM phone": one location fix, turning location on just for it. */
+    @SuppressLint("MissingPermission")
+    private fun locate(from: java.net.InetSocketAddress?) {
+        val svc = rt.shizuku.service
+        runCatching { svc?.remoteAction("grant-extras", "") }
+        val wasOn = runCatching { svc?.remoteAction("location-state", "") }.getOrNull()?.contains("true") != false
+        if (!wasOn) runCatching { svc?.remoteAction("location", "on") }
+        val lm = app.getSystemService(android.location.LocationManager::class.java)
+        fun reply(l: android.location.Location?) {
+            if (!wasOn) runCatching { svc?.remoteAction("location", "off") }
+            send(if (l == null) JSONObject().put("op", "location").put("ok", false)
+                else JSONObject().put("op", "location").put("ok", true).put("lat", l.latitude).put("lon", l.longitude)
+                    .put("acc", l.accuracy.toDouble()).put("at", l.time), from)
+            AppLog.i("control: location ${if (l == null) "not found" else "sent"}")
+        }
+        val provider = listOf("fused", android.location.LocationManager.GPS_PROVIDER, android.location.LocationManager.NETWORK_PROVIDER)
+            .firstOrNull { runCatching { lm.isProviderEnabled(it) || it == "fused" }.getOrDefault(false) && lm.allProviders.contains(it) }
+        if (provider == null) { reply(runCatching { lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER) }.getOrNull()); return }
+        val cancel = android.os.CancellationSignal()
+        var done = false
+        main.postDelayed({ if (!done) { done = true; cancel.cancel(); reply(runCatching { lm.getLastKnownLocation(provider) }.getOrNull()) } }, 40_000)
+        main.post {
+            runCatching {
+                lm.getCurrentLocation(provider, cancel, app.mainExecutor) { l -> if (!done) { done = true; reply(l) } }
+            }.onFailure { if (!done) { done = true; reply(null) } }
+        }
     }
 
     private fun hasPhoneState() = app.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
@@ -177,9 +302,9 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
     // ------------------------------------------------------------ USSD
 
     @SuppressLint("MissingPermission")
-    private fun ussd(code: String, sim: Int?) {
+    private fun ussd(code: String, sim: Int?, from: java.net.InetSocketAddress?) {
         val clean = code.trim()
-        fun reply(ok: Boolean, text: String) = send(JSONObject().put("op", "ussd-result").put("code", clean).put("ok", ok).put("text", text))
+        fun reply(ok: Boolean, text: String) = send(JSONObject().put("op", "ussd-result").put("code", clean).put("ok", ok).put("text", text), from)
         if (!Regex("[0-9*#+]{2,40}").matches(clean) || !clean.endsWith("#")) { reply(false, "Not a USSD code"); return }
         if (app.checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
             reply(false, "The SIM phone needs the Phone permission"); return
@@ -203,7 +328,7 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
 
     // ------------------------------------------------------------ remote switches
 
-    private fun control(action: String, on: Boolean) {
+    private fun control(action: String, on: Boolean, from: java.net.InetSocketAddress? = null) {
         AppLog.i("control: $action ${if (on) "on" else "off"}")
         when (action) {
             "power-saver" -> rt.setCompanionPower(on)
@@ -213,7 +338,7 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
             else -> return
         }
         // Report the new state once things settle.
-        main.postDelayed({ send(status()) }, if (action == "hotspot") 6000 else 2500)
+        main.postDelayed({ send(status(), from) }, if (action == "hotspot") 6000 else 2500)
     }
 
     private fun privileged(action: String, arg: String) {
@@ -226,14 +351,14 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
 
 /** Active SIM cards: 1-based slot numbers, as the user sees them. */
 object Sims {
-    data class Sim(val slot: Int, val subId: Int, val name: String, val carrier: String)
+    data class Sim(val slot: Int, val subId: Int, val name: String, val carrier: String, val esim: Boolean = false)
 
     @SuppressLint("MissingPermission")
     fun list(ctx: Context): List<Sim> {
         if (ctx.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) return emptyList()
         val sm = ctx.getSystemService(SubscriptionManager::class.java) ?: return emptyList()
         return runCatching { sm.activeSubscriptionInfoList.orEmpty() }.getOrDefault(emptyList()).map {
-            Sim(it.simSlotIndex + 1, it.subscriptionId, it.displayName?.toString().orEmpty(), it.carrierName?.toString().orEmpty())
+            Sim(it.simSlotIndex + 1, it.subscriptionId, it.displayName?.toString().orEmpty(), it.carrierName?.toString().orEmpty(), it.isEmbedded)
         }.sortedBy { it.slot }
     }
 

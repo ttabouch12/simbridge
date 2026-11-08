@@ -1,0 +1,28 @@
+name: Compatibility report
+description: Tell others whether SimBridge works on your SIM phone
+title: "Compatibility: "
+labels: [compatibility]
+body:
+  - type: input
+    id: phone
+    attributes: { label: SIM phone (maker and model), placeholder: "Samsung Galaxy A56" }
+    validations: { required: true }
+  - type: input
+    id: android
+    attributes: { label: Android version / skin, placeholder: "Android 17, One UI 9" }
+    validations: { required: true }
+  - type: dropdown
+    id: result
+    attributes:
+      label: Call audio
+      options: ["Works both ways", "Only one direction", "No audio", "Calls don't connect"]
+    validations: { required: true }
+  - type: input
+    id: method
+    attributes: { label: Cellular audio method that works (SIM phone → ⚙ → Cellular audio), placeholder: "Direct telephony" }
+  - type: textarea
+    id: test
+    attributes: { label: Result of Dashboard → Calls → "Does it work on my phone?" (optional) }
+  - type: textarea
+    id: notes
+    attributes: { label: Notes (Shizuku version, quirks) }

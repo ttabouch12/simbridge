@@ -15,6 +15,16 @@ import java.util.concurrent.atomic.AtomicReference
 internal object RemoteActions {
     private const val TAG = "VsaRemote"
     private val PKG = Regex("[A-Za-z0-9_.]+")
+    private val APN_SAFE = Regex("[A-Za-z0-9_.,@\\- ]{0,64}")
+    private val AP_IFACES = listOf("ap0", "swlan0", "wlan1", "softap0", "wlan2")
+
+    // Bit = 1 << (TelephonyManager.NETWORK_TYPE_x - 1)
+    private fun bits(vararg t: Int) = t.fold(0L) { m, x -> m or (1L shl (x - 1)) }
+    private val G2 = bits(1, 2, 4, 7, 11, 16)                       // GPRS EDGE CDMA 1xRTT IDEN GSM
+    private val G3 = bits(3, 5, 6, 8, 9, 10, 12, 14, 15, 17)        // UMTS EVDO HSPA(+) EHRPD TD-SCDMA
+    private val G4 = bits(13, 18, 19)                               // LTE IWLAN LTE-CA
+    private val NR = bits(20)
+    private val NET_MASKS = linkedMapOf("5g" to (G2 or G3 or G4 or NR), "4g" to (G2 or G3 or G4), "3g" to (G2 or G3), "2g" to G2)
 
     fun run(ctx: Context, self: String, action: String, arg: String): String = when (action) {
         "mobile-data" -> {
@@ -30,6 +40,56 @@ internal object RemoteActions {
             if (r.exit == 0) "sms app: $arg" else "error: ${r.out.trim()}"
         }
         "role-holder" -> ShellEnv.run("cmd", "role", "get-role-holders", "--user", "0", "android.app.role.SMS").out.trim()
+        // Devices on the hotspot: the neighbour table of the soft-AP interfaces.
+        "hotspot-clients" -> ShellEnv.run("ip", "neigh", "show").out.lineSequence()
+            .filter { l -> AP_IFACES.any { " dev $it " in l } && ("REACHABLE" in l || "STALE" in l || "DELAY" in l) }
+            .joinToString("\n")
+        // arg "slot:mode", slot 0-based, mode 5g / 4g / 3g / 2g = highest generation allowed.
+        "network-mode" -> {
+            val (slot, mode) = arg.split(':', limit = 2).let { it[0].toInt() to it.getOrElse(1) { "" } }
+            val mask = NET_MASKS[mode] ?: error("bad mode")
+            val r = ShellEnv.run("cmd", "phone", "set-allowed-network-types-for-users", "-s", slot.toString(),
+                java.lang.Long.toBinaryString(mask))
+            if (r.exit == 0) "network: $mode" else "error: ${r.out.trim()}"
+        }
+        "network-mode-get" -> {
+            val out = ShellEnv.run("cmd", "phone", "get-allowed-network-types-for-users", "-s", arg.toInt().toString()).out
+            val mask = Regex("[01]{8,}").find(out)?.value?.toLongOrNull(2) ?: return "?"
+            NET_MASKS.entries.firstOrNull { it.value == mask }?.key ?: if (mask and NR != 0L) "5g" else "custom"
+        }
+        "apn-list" -> ShellEnv.run("content", "query", "--uri", "content://telephony/carriers/current",
+            "--projection", "_id:name:apn:type:numeric:current").out.trim()
+        "apn-preferred" -> ShellEnv.run("content", "query", "--uri", "content://telephony/carriers/preferapn",
+            "--projection", "_id:name:apn").out.trim()
+        "apn-select" -> {
+            val id = arg.toLong()
+            val r = ShellEnv.run("content", "insert", "--uri", "content://telephony/carriers/preferapn", "--bind", "apn_id:l:$id")
+            if (r.exit == 0) "apn: $id" else "error: ${r.out.trim()}"
+        }
+        // arg "name|apn|mcc|mnc|type|user|password"
+        "apn-add" -> {
+            val f = arg.split('|')
+            require(f.size >= 4 && f.all { v -> APN_SAFE.matches(v) }) { "bad APN fields" }
+            val binds = mutableListOf("name:s:${f[0]}", "apn:s:${f[1]}", "mcc:s:${f[2]}", "mnc:s:${f[3]}",
+                "numeric:s:${f[2]}${f[3]}", "type:s:${f.getOrElse(4) { "default,supl,mms" }.ifBlank { "default,supl,mms" }}")
+            f.getOrNull(5)?.takeIf { it.isNotBlank() }?.let { binds += "user:s:$it" }
+            f.getOrNull(6)?.takeIf { it.isNotBlank() }?.let { binds += "password:s:$it" }
+            val r = ShellEnv.run("content", "insert", "--uri", "content://telephony/carriers", *binds.flatMap { listOf("--bind", it) }.toTypedArray())
+            if (r.exit == 0) "apn added" else "error: ${r.out.trim()}"
+        }
+        // Location for "find my SIM phone": on for the fix, then back as it was.
+        "location" -> {
+            val r = ShellEnv.run("cmd", "location", "set-location-enabled", if (arg == "on") "true" else "false")
+            if (r.exit == 0) "location $arg" else "error: ${r.out.trim()}"
+        }
+        "location-state" -> ShellEnv.run("cmd", "location", "is-location-enabled").out.trim()
+        // Lets the gateway read data usage and its own location (once, idempotent).
+        "grant-extras" -> {
+            ShellEnv.run("appops", "set", self, "GET_USAGE_STATS", "allow")
+            for (p in listOf("android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION",
+                "android.permission.ACCESS_BACKGROUND_LOCATION")) ShellEnv.run("pm", "grant", self, p)
+            "granted"
+        }
         else -> "error: unknown action"
     }
 

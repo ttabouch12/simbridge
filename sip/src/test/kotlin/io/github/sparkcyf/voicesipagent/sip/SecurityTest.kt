@@ -129,6 +129,16 @@ class SecurityTest {
     }
 
     @Test
+    fun phoneNumbersMatchAcrossFormats() {
+        val same = io.github.sparkcyf.voicesipagent.voice.PhoneNumbers::same
+        assertTrue(same("+90 555 111 22 33", "05551112233"))
+        assertTrue(same("4441444", "4441444"))
+        assertFalse(same("4441444", "14441444"))
+        assertFalse(same("+905551112233", "+905551112234"))
+        assertFalse(same(null, "123"))
+    }
+
+    @Test
     fun lanFilterAcceptsOnlyPrivateAddresses() {
         for (a in listOf("192.168.1.5", "10.58.140.103", "172.20.0.1", "100.100.1.1", "fe80::1", "fd12::1", "127.0.0.1")) {
             assertTrue(a, LanSourceFilter.isPrivate(InetAddress.getByName(a)))

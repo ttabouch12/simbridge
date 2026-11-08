@@ -92,8 +92,8 @@ fun shortTime(t: Long): String {
 }
 
 fun dayHeader(t: Long): String = when {
-    DateUtils.isToday(t) -> "Today"
-    DateUtils.isToday(t + DateUtils.DAY_IN_MILLIS) -> "Yesterday"
+    DateUtils.isToday(t) || DateUtils.isToday(t + DateUtils.DAY_IN_MILLIS) ->
+        DateUtils.getRelativeTimeSpanString(t, System.currentTimeMillis(), DateUtils.DAY_IN_MILLIS).toString()
     sameYear(t, System.currentTimeMillis()) -> SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(Date(t))
     else -> SimpleDateFormat("d MMMM yyyy", Locale.getDefault()).format(Date(t))
 }

@@ -1,0 +1,25 @@
+Categories:
+  - Phone & SMS
+  - Connectivity
+License: GPL-2.0-or-later
+SourceCode: https://github.com/ttabouch12/simbridge
+IssueTracker: https://github.com/ttabouch12/simbridge/issues
+Changelog: https://github.com/ttabouch12/simbridge/blob/main/CHANGELOG.md
+
+AutoName: SimBridge
+
+RepoType: git
+Repo: https://github.com/ttabouch12/simbridge.git
+
+Builds:
+  - versionName: 2.1.0
+    versionCode: 220
+    commit: v2.1.0
+    subdir: phone
+    gradle:
+      - foss
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 2.1.0
+CurrentVersionCode: 220

@@ -1,0 +1,8 @@
+<p>SimBridge Gateway runs on the Android phone that holds your SIM card. It relays calls, texts and picture messages to <i>SimBridge</i> on your main phone over Wi-Fi or this phone's hotspot, encrypted (TLS + SRTP) and paired with a QR code.</p>
+<ul>
+<li>Bridges cellular call audio using Android's call-audio APIs, granted through Shizuku (no root).</li>
+<li>Built-in SIP server: also works with Linphone and other SIP apps (iPhone, computers).</li>
+<li>Ultimate power saver, quiet mode and an OLED saver (black &amp; white, low resolution) for a phone that only bridges.</li>
+<li>Remote control from the main phone: mobile data, network mode, APN, USSD, find my phone.</li>
+</ul>
+<p>Requires Shizuku. See the README for setup and the compatibility list.</p>

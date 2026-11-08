@@ -1,5 +1,7 @@
 package io.github.simbridge.ui
 
+import io.github.simbridge.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,31 +50,30 @@ fun BlockedScreen(core: LinkCore, onBack: () -> Unit) {
     fun save(new: List<String>) { list = new; core.prefs.blocked = new.toSet(); core.blockRulesChanged() }
 
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Blocked numbers") },
-            navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
+        TopAppBar(title = { Text(stringResource(R.string.blocked_title)) },
+            navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } })
     }) { pad ->
         Column(Modifier.fillMaxSize().padding(pad).padding(horizontal = 16.dp)) {
-            Text("Calls from these numbers are rejected by the SIM phone and logged as blocked. Texts from them are dropped. " +
-                "Numbers blocked in the Phone app are included when SimBridge is the default SMS app.",
+            Text(stringResource(R.string.blocked_text),
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 12.dp)) {
                 OutlinedTextField(input, { v -> input = v.filter { it.isDigit() || it in "+ " } }, singleLine = true,
-                    label = { Text("Phone number") }, modifier = Modifier.weight(1f),
+                    label = { Text(stringResource(R.string.phone_number)) }, modifier = Modifier.weight(1f),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
                 Spacer(Modifier.width(8.dp))
                 Button({ val n = input.trim(); if (n.count(Char::isDigit) >= 3 && n !in list) save(list + n); input = "" },
-                    enabled = input.count(Char::isDigit) >= 3) { Text("Block") }
+                    enabled = input.count(Char::isDigit) >= 3) { Text(stringResource(R.string.block)) }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Column(Modifier.weight(1f)) {
-                    Text("Block hidden numbers", style = MaterialTheme.typography.bodyLarge)
-                    Text("Calls with no caller ID", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.block_hidden), style = MaterialTheme.typography.bodyLarge)
+                    Text(stringResource(R.string.block_hidden_sub), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(hidden, { hidden = it; core.prefs.blockHidden = it; core.blockRulesChanged() })
             }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            if (list.isEmpty()) Text("No blocked numbers.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(8.dp))
+            if (list.isEmpty()) Text(stringResource(R.string.no_blocked), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(8.dp))
             LazyColumn {
                 items(list, key = { it }) { n ->
                     val name = remember(n) { core.contacts.lookup(n)?.name }
@@ -80,7 +81,7 @@ fun BlockedScreen(core: LinkCore, onBack: () -> Unit) {
                         leadingContent = { Icon(Icons.Filled.Block, null, tint = MaterialTheme.colorScheme.error) },
                         headlineContent = { Text(name ?: n) },
                         supportingContent = { if (name != null) Text(n) },
-                        trailingContent = { IconButton({ save(list - n) }) { Icon(Icons.Filled.Close, "Unblock") } },
+                        trailingContent = { IconButton({ save(list - n) }) { Icon(Icons.Filled.Close, stringResource(R.string.unblock)) } },
                     )
                 }
             }

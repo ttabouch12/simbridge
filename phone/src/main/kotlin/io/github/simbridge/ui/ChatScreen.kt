@@ -1,5 +1,7 @@
 package io.github.simbridge.ui
 
+import io.github.simbridge.R
+import androidx.compose.ui.res.stringResource
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -95,7 +97,7 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
         Thread {
             val added = uris.mapNotNull { io.github.simbridge.Mms.prepareOutgoing(ctx, it) }
             android.os.Handler(android.os.Looper.getMainLooper()).post {
-                if (added.size < uris.size) Toast.makeText(ctx, "Some files are too large for a picture message", Toast.LENGTH_LONG).show()
+                if (added.size < uris.size) Toast.makeText(ctx, ctx.getString(R.string.too_large), Toast.LENGTH_LONG).show()
                 pending = pending + added
             }
         }.start()
@@ -114,7 +116,7 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
     Scaffold(
         topBar = {
             TopAppBar(
-                navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Avatar(name, contact?.photo, 40.dp, gateway)
@@ -127,11 +129,11 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
                     }
                 },
                 actions = {
-                    if (!gateway && !group && address.any { it.isDigit() }) IconButton({ call(ctx, address) }) { Icon(Icons.Filled.Call, "Call") }
-                    IconButton({ menu = true }) { Icon(Icons.Filled.MoreVert, "More") }
+                    if (!gateway && !group && address.any { it.isDigit() }) IconButton({ call(ctx, address) }) { Icon(Icons.Filled.Call, stringResource(R.string.call)) }
+                    IconButton({ menu = true }) { Icon(Icons.Filled.MoreVert, stringResource(R.string.more)) }
                     DropdownMenu(menu, { menu = false }) {
-                        DropdownMenuItem(text = { Text("Copy number") }, onClick = { menu = false; copy(ctx, address) })
-                        DropdownMenuItem(text = { Text("Delete conversation") }, onClick = {
+                        DropdownMenuItem(text = { Text(stringResource(R.string.copy_number)) }, onClick = { menu = false; copy(ctx, address) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.delete_conv)) }, onClick = {
                             menu = false; core.deleteConversation(key); onBack()
                         })
                     }
@@ -216,8 +218,8 @@ private fun Bubble(item: Item.Bubble, core: LinkCore, group: Boolean, onRetry: (
         }
         if (item.showStatus || failed) {
             val label = when {
-                failed -> "Not sent · Tap to try again"
-                m.status == Msg.SENDING -> "Sending…"
+                failed -> stringResource(R.string.not_sent_retry)
+                m.status == Msg.SENDING -> stringResource(R.string.sending)
                 m.status == Msg.DELIVERED -> "Delivered · ${clockTime(m.time)}"
                 m.outgoing -> "Sent · ${clockTime(m.time)}"
                 else -> clockTime(m.time)
@@ -242,7 +244,7 @@ private fun Composer(text: String, onText: (String) -> Unit, connected: Boolean,
                     if (bmp != null) androidx.compose.foundation.Image(bmp, null, Modifier.size(72.dp).clip(RoundedCornerShape(12.dp)),
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop)
                     androidx.compose.material3.SmallFloatingActionButton({ onRemove(a) }, Modifier.align(Alignment.TopEnd).size(24.dp)) {
-                        Icon(Icons.Filled.Close, "Remove", Modifier.size(14.dp))
+                        Icon(Icons.Filled.Close, stringResource(R.string.remove), Modifier.size(14.dp))
                     }
                 }
             }
@@ -251,10 +253,10 @@ private fun Composer(text: String, onText: (String) -> Unit, connected: Boolean,
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            IconButton(onAttach, Modifier.padding(bottom = 4.dp)) { Icon(Icons.Filled.AddPhotoAlternate, "Add picture") }
+            IconButton(onAttach, Modifier.padding(bottom = 4.dp)) { Icon(Icons.Filled.AddPhotoAlternate, stringResource(R.string.add_picture)) }
             TextField(
                 value = text, onValueChange = onText,
-                placeholder = { Text(if (connected) "Text message" else "Text message · SIM phone offline") },
+                placeholder = { Text(if (connected) stringResource(R.string.text_hint) else stringResource(R.string.text_hint_offline)) },
                 shape = RoundedCornerShape(28.dp), maxLines = 6,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 colors = TextFieldDefaults.colors(
@@ -264,7 +266,7 @@ private fun Composer(text: String, onText: (String) -> Unit, connected: Boolean,
                 modifier = Modifier.weight(1f),
             )
             FilledIconButton(onClick = onSend, enabled = text.isNotBlank() || pending.isNotEmpty(), modifier = Modifier.size(56.dp)) {
-                Icon(Icons.AutoMirrored.Filled.Send, "Send")
+                Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.send))
             }
         }
       }
@@ -284,7 +286,7 @@ private fun AttachmentView(a: io.github.simbridge.Attachment, outgoing: Boolean)
     }
     if (a.isImage) {
         val bmp = remember(a) { io.github.simbridge.Mms.thumbnail(ctx, a)?.asImageBitmap() }
-        if (bmp != null) androidx.compose.foundation.Image(bmp, "Picture",
+        if (bmp != null) androidx.compose.foundation.Image(bmp, stringResource(R.string.picture),
             Modifier.padding(vertical = 2.dp).widthIn(max = 260.dp).clip(RoundedCornerShape(18.dp))
                 .clickable { open() }, contentScale = androidx.compose.ui.layout.ContentScale.FillWidth)
         return
@@ -310,7 +312,7 @@ private fun buildItems(msgs: List<Msg>): List<Item> {
 
 private fun copy(ctx: android.content.Context, text: String) {
     ctx.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("text", text))
-    Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
+    Toast.makeText(ctx, ctx.getString(R.string.copied), Toast.LENGTH_SHORT).show()
 }
 
 fun call(ctx: android.content.Context, number: String) {

@@ -19,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import io.github.simbridge.ui.ChatScreen
 import io.github.simbridge.ui.ConversationsScreen
 import io.github.simbridge.ui.LinkTheme
@@ -57,24 +58,32 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
                     val s by screen
                     BackHandler(enabled = s != Screen.List) {
-                        screen.value = if (s == Screen.SimPhone || s == Screen.Blocked || s == Screen.Recordings) Screen.Settings else Screen.List
+                        screen.value = if (s == Screen.Blocked || s == Screen.Recordings) Screen.Settings else Screen.List
                     }
                     io.github.simbridge.ui.ConfirmPairing(core, pendingPair.value) { pendingPair.value = null }
+                    val tab = s == Screen.List || s == Screen.SimPhone || s == Screen.Settings
+                    androidx.compose.material3.Scaffold(
+                        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0),
+                        bottomBar = { if (tab) io.github.simbridge.ui.BottomTabs(s) { screen.value = it } },
+                    ) { tabPad ->
+                    androidx.compose.foundation.layout.Box(Modifier.padding(bottom = tabPad.calculateBottomPadding())) {
                     AnimatedContent(s, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "nav") { cur ->
                         when (cur) {
                             Screen.List -> ConversationsScreen(core,
                                 onOpen = { k, a -> screen.value = Screen.Chat(k, a) },
                                 onNew = { screen.value = Screen.NewChat },
                                 onSettings = { screen.value = Screen.Settings })
+                            Screen.SimPhone -> io.github.simbridge.ui.SimPhoneScreen(core)
                             is Screen.Chat -> ChatScreen(core, cur.key, cur.address, cur.draft) { screen.value = Screen.List }
                             Screen.NewChat -> NewChatScreen(core, { screen.value = Screen.List }) { k, a -> screen.value = Screen.Chat(k, a) }
                             Screen.Settings -> SettingsScreen(core, onSimPhone = { screen.value = Screen.SimPhone },
                                 onBlocked = { screen.value = Screen.Blocked },
-                                onRecordings = { screen.value = Screen.Recordings }) { screen.value = Screen.List }
+                                onRecordings = { screen.value = Screen.Recordings }, onBack = null)
                             Screen.Recordings -> io.github.simbridge.ui.RecordingsScreen { screen.value = Screen.Settings }
-                            Screen.SimPhone -> io.github.simbridge.ui.SimPhoneScreen(core) { screen.value = Screen.Settings }
                             Screen.Blocked -> io.github.simbridge.ui.BlockedScreen(core) { screen.value = Screen.Settings }
                         }
+                    }
+                    }
                     }
                 }
             }

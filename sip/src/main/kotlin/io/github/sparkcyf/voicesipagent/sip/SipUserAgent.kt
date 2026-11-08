@@ -66,7 +66,7 @@ class SipUserAgent(
      * SimBridge control messages (JSON, [CONTROL_TYPE]) in either direction: from the registered
      * phone in server mode, from the server in client mode. Only reached after authentication.
      */
-    @Volatile var controlHandler: ((String) -> Unit)? = null
+    @Volatile var controlHandler: ((String, InetSocketAddress) -> Unit)? = null
     @Volatile override var status: EndpointStatus = EndpointStatus(false, "stopped")
         private set
 
@@ -102,6 +102,8 @@ class SipUserAgent(
      * other SIP apps are keyed by IP address.
      */
     private val bindings = java.util.concurrent.ConcurrentHashMap<String, PhoneBinding>()
+    /** True if a registered phone is at [ip] (server mode). */
+    fun isRegisteredAddress(ip: String) = bindings.values.any { it.addr.address.hostAddress == ip }
     /** Number of phones registered right now (server mode). */
     val registeredPhones: Int get() = bindings.size
     private fun bindingFor(from: InetSocketAddress) =
@@ -120,9 +122,13 @@ class SipUserAgent(
         val handler: (SipMessage, InetSocketAddress) -> Unit = { msg, from -> post { onMessage(msg, from) } }
         if (config.serverMode) {
             val udp = if (config.udpEnabled || config.tls == null) UdpSipTransport(config.localPort, log, config.sourceFilter, handler) else null
-            val tls = config.tls?.let { TlsServerTransport(it.port, it.sslContext, log, config.sourceFilter, handler) }
+            val tls = config.tls?.let {
+                TlsServerTransport(it.port, it.sslContext, log, config.sourceFilter, handler) { addr ->
+                    post { bindings.values.filter { b -> b.addr == addr }.forEach { b -> dropBinding(b.ip, "disconnected") } }
+                }
+            }
             transport = ServerTransport(udp, tls)
-            executor.scheduleWithFixedDelay({ (transport as? ServerTransport)?.reapIdle(15 * 60_000L) }, 60, 60, TimeUnit.SECONDS)
+            executor.scheduleWithFixedDelay({ (transport as? ServerTransport)?.reapIdle(15 * 60_000L) }, 15, 15, TimeUnit.SECONDS)
         } else if (config.tls != null) {
             resolve()
             transport = TlsClientTransport(serverAddr, config.tls.sslContext, log, handler,
@@ -218,9 +224,15 @@ class SipUserAgent(
      * Server mode: deliver an incoming SMS to the registered phone as an out-of-dialog SIP MESSAGE
      * (shown as a chat message in the softphone). Returns false if no phone is currently registered.
      */
-    fun sendMessage(fromNumber: String?, text: String, displayName: String? = null, meta: TextMeta = TextMeta()): Boolean {
+    /**
+     * Server mode: relays a text to every registered phone. [onResult] gets true once any phone
+     * accepted it (2xx), false if none did; callers queue it again on false.
+     */
+    fun sendMessage(fromNumber: String?, text: String, displayName: String? = null, meta: TextMeta = TextMeta(),
+                    onResult: (Boolean) -> Unit = {}): Boolean {
         val phones = bindings.values.toList()
         if (phones.isEmpty()) return false
+        val agg = Aggregate(phones.size, onResult)
         post {
             val fromUser = (fromNumber ?: "sms").filter { it.isLetterOrDigit() || it == '+' }.ifEmpty { "sms" }
             for (b in phones) {
@@ -229,7 +241,7 @@ class SipUserAgent(
                 req.headers.add("Content-Type", "text/plain;charset=UTF-8")
                 meta.writeTo(req.headers)
                 req.body = text.toByteArray(Charsets.UTF_8)
-                sendClient(req, b.addr) { /* delivery response ignored; best-effort */ }
+                sendClient(req, b.addr) { r -> if (r == null || !r.isProvisional) agg.done(r?.code in 200..299) }
             }
             log.info("SMS from ${redactNumber(fromNumber)} relayed to ${phones.size} phone(s)")
         }
@@ -240,17 +252,18 @@ class SipUserAgent(
      * Sends a control message ([CONTROL_TYPE] JSON). Server mode: to the registered phone (false
      * if none). Client mode: to the server, with digest auth. [onResult] gets the final SIP code.
      */
-    fun sendControl(json: String, onResult: (Int?) -> Unit = {}): Boolean {
+    fun sendControl(json: String, to: InetSocketAddress? = null, onResult: (Int?) -> Unit = {}): Boolean {
         if (config.serverMode) {
-            val phones = bindings.values.toList()
+            val phones = bindings.values.filter { to == null || it.addr == to }.ifEmpty { if (to != null) bindings.values.toList() else emptyList() }
             if (phones.isEmpty()) return false
+            val agg = Aggregate(phones.size) { ok -> onResult(if (ok) 200 else null) }
             post {
                 for (b in phones) {
                     val from = NameAddr("SimBridge", "sip:gateway@$localDomain").withTag(newTag())
                     val req = newRequest("MESSAGE", b.contactUri, from, NameAddr(null, b.contactUri), newCallId(), 1)
                     req.headers.add("Content-Type", CONTROL_TYPE)
                     req.body = json.toByteArray(Charsets.UTF_8)
-                    sendClient(req, b.addr) { r -> if (r == null || !r.isProvisional) onResult(r?.code) }
+                    sendClient(req, b.addr) { r -> if (r == null || !r.isProvisional) agg.done(r?.code in 200..299) }
                 }
             }
             return true
@@ -477,7 +490,8 @@ class SipUserAgent(
         if (h == null) { tx.respond(buildResponse(req, 415, toTag = newTag())); return }
         tx.respond(buildResponse(req, 200, toTag = newTag()))
         val body = req.bodyText
-        runCatching { h(body) }.onFailure { log.warn("control message failed: ${it.message}") }
+        val src = tx.source
+        runCatching { h(body, src) }.onFailure { log.warn("control message failed: ${it.message}") }
     }
 
     /**
@@ -578,6 +592,7 @@ class SipUserAgent(
         }
         if (ok) {
             authFailTimes.remove(ip); authBanUntil.remove(ip)
+            (transport as? ServerTransport)?.trust(from)
             cred?.nonce?.let { issuedNonces.remove(it) }   // single use: a captured request can't be replayed
             return true
         }
@@ -816,6 +831,16 @@ class SipUserAgent(
 
     companion object {
         const val CONTROL_TYPE = "application/vnd.simbridge+json"
+
+        /** Calls [cb] once: true as soon as one of [n] sends succeeded, false when all failed. */
+        internal class Aggregate(private var left: Int, private val cb: (Boolean) -> Unit) {
+            private var fired = false
+            @Synchronized fun done(ok: Boolean) {
+                if (fired) return
+                left--
+                if (ok || left <= 0) { fired = true; cb(ok) }
+            }
+        }
         /** Main phones that may be registered at once (calls ring on all of them). */
         const val MAX_PHONES = 4
         const val ALLOW = "INVITE, ACK, CANCEL, BYE, OPTIONS, INFO, NOTIFY, UPDATE, MESSAGE"

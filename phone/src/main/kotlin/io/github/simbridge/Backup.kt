@@ -32,7 +32,14 @@ object Backup {
                         .apply { if (m.att.isNotEmpty()) put("att", m.att) })
                 }
             })
-        ctx.contentResolver.openOutputStream(to, "wt")!!.use { it.write(o.toString(1).toByteArray()) }
+        // Picture-message files go in too, or restored chats would show empty bubbles.
+        o.put("files", JSONObject().apply {
+            msgs.forEach { m -> MmsInfo.parse(m.att)?.files?.forEach { a ->
+                val f = Mms.fileOf(ctx, a)
+                if (f.exists() && !has(a.file)) put(a.file, android.util.Base64.encodeToString(f.readBytes(), android.util.Base64.NO_WRAP))
+            } }
+        })
+        ctx.contentResolver.openOutputStream(to, "wt")!!.use { it.write(o.toString().toByteArray()) }
         return msgs.size
     }
 
@@ -46,6 +53,14 @@ object Backup {
             core.prefs.mirrorToSystem = s.optBoolean("mirrorToSystem", core.prefs.mirrorToSystem)
             core.prefs.autoRecord = s.optBoolean("autoRecord", core.prefs.autoRecord)
             core.prefs.blockHidden = s.optBoolean("blockHidden", core.prefs.blockHidden)
+        }
+        o.optJSONObject("files")?.let { files ->
+            val dir = java.io.File(ctx.filesDir, "mms").apply { mkdirs() }
+            for (name in files.keys()) {
+                if ('/' in name || name.startsWith(".")) continue
+                val f = java.io.File(dir, name)
+                if (!f.exists()) runCatching { f.writeBytes(android.util.Base64.decode(files.getString(name), android.util.Base64.DEFAULT)) }
+            }
         }
         o.optJSONArray("blocked")?.let { a -> core.prefs.blocked = core.prefs.blocked + (0 until a.length()).map { a.getString(it) } }
         val have = core.store.all().map { Triple(MessageStore.keyOf(it.address), it.time, it.body) }.toHashSet()

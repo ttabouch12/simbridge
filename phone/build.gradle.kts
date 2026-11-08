@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.simbridge"
         minSdk = 34
         targetSdk = 36
-        versionCode = 200
-        versionName = "2.0.0"
+        versionCode = 220
+        versionName = "2.1.0"
     }
     // Same signing source as the gateway app: a git-ignored signing.properties in the project root.
     val localSigning = Properties().apply {
@@ -47,6 +47,20 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+    // full: Google's code scanner for pairing, update check on. foss: no Google code (F-Droid);
+    // pair with the camera app (it opens the simbridge://pair link) or paste the link.
+    flavorDimensions += "store"
+    productFlavors {
+        create("full") {
+            dimension = "store"
+            buildConfigField("boolean", "UPDATE_CHECK_DEFAULT", "true")
+        }
+        create("foss") {
+            dimension = "store"
+            buildConfigField("boolean", "UPDATE_CHECK_DEFAULT", "false")
+        }
     }
     packaging {
         resources.excludes += "META-INF/*.kotlin_module"
@@ -64,6 +78,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation(libs.kotlinx.coroutines.android)
     // QR scanning for pairing via Google Play services (no camera permission needed).
-    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    "fullImplementation"("com.google.android.gms:play-services-code-scanner:16.1.0")
 }
 

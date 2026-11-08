@@ -1,5 +1,7 @@
 package io.github.simbridge.ui
 
+import io.github.simbridge.R
+import androidx.compose.ui.res.stringResource
 import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,10 +34,10 @@ fun RecordingsScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val items = remember { Recordings.list(ctx) }
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Recordings") },
-            navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
+        TopAppBar(title = { Text(stringResource(R.string.recordings)) },
+            navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } })
     }) { pad ->
-        if (items.isEmpty()) Text("No recordings yet. Tap Record in the notification during a call.",
+        if (items.isEmpty()) Text(stringResource(R.string.no_recordings),
             Modifier.padding(pad).padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         LazyColumn(Modifier.fillMaxSize().padding(pad)) {
             items(items, key = { it.uri.toString() }) { r ->
@@ -50,8 +52,8 @@ fun RecordingsScreen(onBack: () -> Unit) {
                     trailingContent = {
                         IconButton({
                             runCatching { ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("audio/mp4")
-                                .putExtra(Intent.EXTRA_STREAM, r.uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share recording")) }
-                        }) { Icon(Icons.Filled.Share, "Share") }
+                                .putExtra(Intent.EXTRA_STREAM, r.uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), ctx.getString(R.string.share_recording))) }
+                        }) { Icon(Icons.Filled.Share, stringResource(R.string.share)) }
                     },
                 )
             }

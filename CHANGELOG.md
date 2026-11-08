@@ -1,5 +1,39 @@
 # Changelog
 
+## SimBridge 2.1.0
+
+### Main phone
+- **New layout:** Messages, Dashboard and Settings tabs.
+- **Dashboard** with a live picture of the SIM phone: every SIM (number, carrier, eSIM, signal),
+  data used today / this month, devices on its hotspot, **network mode** per SIM (5G / 4G / 3G / 2G),
+  **APN** list, choice and new APNs (experimental), **find my SIM phone** (location → Maps).
+- **Carrier voicemail:** unanswered calls go back to the carrier after 15 / 25 / 40 s.
+- **"Does it work on my phone?"** audio test call, with a one-tap compatibility report.
+- **Texts in a browser** on your computer (HTTPS on the LAN, 6-digit code, session cookie).
+- **Caller names on the SIM phone** (contact names sent from the main phone; can be turned off).
+- **Away from home:** optional VPN address of the SIM phone (Tailscale / WireGuard).
+- **Update check** once a day (off in the FOSS build).
+- **Languages:** Arabic, Farsi, French, Russian, Spanish, Turkish (and English); per-app language.
+- **FOSS build** without Google code, for F-Droid.
+- Backups now include pictures.
+
+### SIM phone (gateway)
+- **Any SIP app** (Linphone on iPhone/Mac/Windows/Linux, Acrobits, Zoiper): QR setup for Linphone,
+  account details for others. Calls ring on every registered app and phone.
+- **OLED saver** in the power saver: black & white, dark theme, 60 Hz, lower resolution.
+- Remote network mode, APN, location and hotspot-device list for the dashboard.
+
+### Fixes
+- Texts and missed-call alerts are no longer lost while the main phone is away: anything a phone
+  didn't confirm is kept and resent when it reconnects.
+- A phone that disconnects is dropped at once instead of up to 20 minutes later.
+- Connections that don't log in within 30 s are closed, and large messages are only accepted after
+  login (a device on the Wi-Fi could block the phones before).
+- Old SIP stack, transport and SRTP settings that no longer did anything were removed; the unused
+  native pjsua2 module was deleted.
+- Replies (status, USSD) go only to the phone that asked.
+
+
 ## SimBridge 2.0.0
 
 ### Security (breaking: pair the phones again once)

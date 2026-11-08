@@ -1,5 +1,7 @@
 package io.github.simbridge.ui
 
+import io.github.simbridge.R
+import androidx.compose.ui.res.stringResource
 import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -101,7 +103,7 @@ fun ConversationsScreen(core: LinkCore, onOpen: (String, String) -> Unit, onNew:
             ExtendedFloatingActionButton(
                 onClick = onNew, expanded = expanded,
                 icon = { Icon(Icons.AutoMirrored.Filled.Chat, null) },
-                text = { Text("Start chat") },
+                text = { Text(stringResource(R.string.start_chat)) },
             )
         },
     ) { pad ->
@@ -120,10 +122,10 @@ fun ConversationsScreen(core: LinkCore, onOpen: (String, String) -> Unit, onNew:
         AlertDialog(
             onDismissRequest = { toDelete = null },
             icon = { Icon(Icons.Outlined.Delete, null) },
-            title = { Text("Delete conversation?") },
-            text = { Text("Messages with ${r.name} will be removed from SimBridge (and their copies from your Messages app). They stay on the SIM phone.") },
-            confirmButton = { TextButton({ core.deleteConversation(r.conv.key); toDelete = null }) { Text("Delete") } },
-            dismissButton = { TextButton({ toDelete = null }) { Text("Cancel") } },
+            title = { Text(stringResource(R.string.delete_conv_q)) },
+            text = { Text(stringResource(R.string.delete_conv_text, r.name)) },
+            confirmButton = { TextButton({ core.deleteConversation(r.conv.key); toDelete = null }) { Text(stringResource(R.string.delete)) } },
+            dismissButton = { TextButton({ toDelete = null }) { Text(stringResource(R.string.cancel)) } },
         )
     }
 }
@@ -141,14 +143,14 @@ private fun SearchBar(query: String, onQuery: (String) -> Unit, onSettings: () -
                 Icon(Icons.Filled.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextField(
                     value = query, onValueChange = onQuery, singleLine = true,
-                    placeholder = { Text("Search conversations") },
+                    placeholder = { Text(stringResource(R.string.search)) },
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
                         focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
                     modifier = Modifier.weight(1f),
                 )
-                if (query.isNotEmpty()) IconButton({ onQuery("") }) { Icon(Icons.Filled.Close, "Clear") }
-                IconButton(onSettings) { Icon(Icons.Filled.Settings, "Settings") }
+                if (query.isNotEmpty()) IconButton({ onQuery("") }) { Icon(Icons.Filled.Close, stringResource(R.string.clear)) }
+                IconButton(onSettings) { Icon(Icons.Filled.Settings, stringResource(R.string.tab_settings)) }
                 Spacer(Modifier.width(4.dp))
             }
         }
@@ -159,9 +161,9 @@ private fun SearchBar(query: String, onQuery: (String) -> Unit, onSettings: () -
 private fun StatusBanner(s: LinkStatus, onSettings: () -> Unit) {
     val (icon, text, problem) = when (s.state) {
         LinkState.CONNECTED -> Triple(Icons.Filled.Wifi, "Connected via ${s.network}", false)
-        LinkState.SEARCHING -> Triple(Icons.Filled.Sync, "Looking for your SIM phone…", true)
+        LinkState.SEARCHING -> Triple(Icons.Filled.Sync, stringResource(R.string.looking), true)
         LinkState.NO_WIFI -> Triple(Icons.Filled.WifiOff, s.detail, true)
-        LinkState.NEEDS_PASSWORD -> Triple(Icons.Filled.Key, s.detail.ifBlank { "Finish setting up" }, true)
+        LinkState.NEEDS_PASSWORD -> Triple(Icons.Filled.Key, s.detail.ifBlank { stringResource(R.string.finish_setup) }, true)
     }
     val bg = if (problem) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer
     val fg = if (problem) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer
@@ -188,8 +190,8 @@ private fun ConversationRow(r: ConvRow, modifier: Modifier) {
                 fontWeight = if (unread) FontWeight.Bold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val prefix = when {
                 !m.outgoing -> ""
-                m.status == Msg.FAILED -> "Not sent: "
-                else -> "You: "
+                m.status == Msg.FAILED -> stringResource(R.string.not_sent_prefix)
+                else -> stringResource(R.string.you_prefix)
             }
             Text(prefix + m.body.ifBlank { if (m.att.isNotBlank()) "📷 Photo" else "" }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Normal,
@@ -214,8 +216,8 @@ private fun EmptyState(searching: Boolean) {
     Column(Modifier.fillMaxWidth().padding(top = 96.dp, start = 32.dp, end = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(Icons.Outlined.Forum, null, Modifier.size(72.dp), tint = MaterialTheme.colorScheme.outline)
         Spacer(Modifier.height(16.dp))
-        Text(if (searching) "No matches" else "No conversations yet", style = MaterialTheme.typography.titleMedium)
-        if (!searching) Text("Texts sent to your SIM's number will show up here.",
+        Text(if (searching) stringResource(R.string.no_matches) else stringResource(R.string.no_convs), style = MaterialTheme.typography.titleMedium)
+        if (!searching) Text(stringResource(R.string.no_convs_sub),
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

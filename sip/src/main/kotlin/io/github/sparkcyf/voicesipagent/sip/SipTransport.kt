@@ -102,6 +102,8 @@ internal class SipStreamReader(input: InputStream) {
     private val inp = BufferedInputStream(input, 16 * 1024)
     private var crlfs = 0
     private var lastCrlfMs = 0L
+    /** Small until the peer has proved the password; then large enough for picture messages. */
+    @Volatile var maxBody = SMALL_BODY
 
     /** Next message's bytes, or null at end of stream. Keep-alive CRLFs are skipped (reported via [onKeepAlive]). */
     fun next(onKeepAlive: (pingWithDoubleCrlf: Boolean) -> Unit): ByteArray? {
@@ -143,7 +145,7 @@ internal class SipStreamReader(input: InputStream) {
         }
         val headText = head.toString(Charsets.UTF_8.name())
         val len = Regex("(?im)^(?:Content-Length|l)\\s*:\\s*(\\d+)").find(headText)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-        if (len > MAX_BODY) throw SocketException("SIP body too large")
+        if (len > maxBody) throw SocketException("SIP body too large")
         val body = ByteArray(len)
         var off = 0
         while (off < len) {
@@ -158,6 +160,7 @@ internal class SipStreamReader(input: InputStream) {
         const val MAX_HEADER = 32 * 1024
         /** Picture messages travel as control messages over TLS: allow a few MB. */
         const val MAX_BODY = 4 * 1024 * 1024
+        const val SMALL_BODY = 64 * 1024
     }
 }
 
@@ -177,6 +180,13 @@ internal class SipConnection(
     @Volatile private var closed = false
     /** Set when we sent a ping and are waiting for the CRLF pong. */
     @Volatile var pingSentAtMs = 0L
+    val openedAtMs = System.currentTimeMillis()
+    /** Set once a request on this connection passed digest auth. */
+    @Volatile var trusted = false
+        private set
+    @Volatile private var reader: SipStreamReader? = null
+
+    fun trust() { trusted = true; reader?.maxBody = SipStreamReader.MAX_BODY }
 
     fun start() = Thread(::loop, "sip-tls-${remote.port}").apply { isDaemon = true }.start()
 
@@ -194,7 +204,10 @@ internal class SipConnection(
                 socket.startHandshake()
                 socket.soTimeout = 0
             }
-            val reader = SipStreamReader(socket.inputStream)
+            val reader = SipStreamReader(socket.inputStream).also {
+                this.reader = it
+                if (trusted || !handshakeHere) it.maxBody = SipStreamReader.MAX_BODY   // client side trusts its pinned server
+            }
             while (!closed) {
                 val bytes = reader.next { doubleCrlf ->
                     lastRxMs = System.currentTimeMillis()
@@ -239,6 +252,8 @@ internal class TlsServerTransport(
     private val log: SipLog,
     private val filter: SourceFilter?,
     private val onMessage: (SipMessage, InetSocketAddress) -> Unit,
+    /** A phone's connection closed: it is gone until it connects again. */
+    private val onConnectionClosed: (InetSocketAddress) -> Unit = {},
 ) {
     private val server: SSLServerSocket = (sslContext.serverSocketFactory.createServerSocket() as SSLServerSocket).apply {
         reuseAddress = true
@@ -260,17 +275,20 @@ internal class TlsServerTransport(
                 continue
             }
             if (conns.size >= MAX_CONNECTIONS) {
-                // Only one phone is expected; drop the oldest to make room (a reconnecting phone wins).
-                conns.values.minByOrNull { it.lastRxMs }?.close()
+                // Make room: an unauthenticated connection goes first, then the quietest one.
+                (conns.values.filter { !it.trusted }.minByOrNull { it.openedAtMs } ?: conns.values.minByOrNull { it.lastRxMs })?.close()
             }
             runCatching { s.tcpNoDelay = true }
-            val c = SipConnection(s, log, onMessage, { conns.remove(it.remote, it) }, handshakeHere = true)
+            val c = SipConnection(s, log, onMessage, { conns.remove(it.remote, it); if (it.trusted) onConnectionClosed(it.remote) }, handshakeHere = true)
             conns[c.remote] = c
             c.start()
         }
     }
 
     fun has(to: InetSocketAddress) = conns[to]?.isClosed == false
+
+    /** Called after a request from [from] passed auth: lifts the pre-auth limits. */
+    fun trust(from: InetSocketAddress) { conns[from]?.trust() }
 
     fun send(msg: SipMessage, to: InetSocketAddress): Boolean {
         val c = conns[to] ?: return false
@@ -282,6 +300,8 @@ internal class TlsServerTransport(
     /** Closes connections that have been silent for [idleMs] (the phone pings every few minutes). */
     fun reapIdle(idleMs: Long) {
         val now = System.currentTimeMillis()
+        // Nobody needs more than half a minute to log in: free the slot (LAN denial of service).
+        conns.values.filter { !it.trusted && now - it.openedAtMs > PREAUTH_MS }.forEach { it.close() }
         conns.values.filter { now - it.lastRxMs > idleMs }.forEach {
             log.info("closing idle TLS connection ${it.remote}")
             it.close()
@@ -294,7 +314,7 @@ internal class TlsServerTransport(
         conns.values.toList().forEach { it.close() }
     }
 
-    companion object { const val MAX_CONNECTIONS = 8 }
+    companion object { const val MAX_CONNECTIONS = 8; const val PREAUTH_MS = 30_000L }
 }
 
 /** Gateway: optional UDP (other SIP apps) + TLS (SimBridge). Replies follow the way requests came in. */
@@ -316,6 +336,7 @@ internal class ServerTransport(
     }
 
     fun reapIdle(idleMs: Long) { tls?.reapIdle(idleMs) }
+    fun trust(from: InetSocketAddress) { tls?.trust(from) }
 
     override fun close() { udp?.close(); tls?.close() }
 }

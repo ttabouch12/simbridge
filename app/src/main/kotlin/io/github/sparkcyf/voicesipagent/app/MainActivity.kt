@@ -299,29 +299,8 @@ private fun SettingsSection(rt: GatewayRuntime) {
         if (serverMode) Text(t("Укажи в софтфоне  <IP этого телефона>:$localPort  по UDP.", "Point your softphone at  <this phone's IP>:$localPort  over UDP."),
             style = MaterialTheme.typography.bodySmall)
         Field(t("Аренда регистрации (сек)", "Registration lease (sec)"), lease, KeyboardType.Number, info = "lease") { lease = it }
-        if (serverMode) {
-            OutlinedTextField(
-                value = regPassword, onValueChange = { regPassword = it },
-                label = { Text(t("Пароль для софтфона (защита регистратора)", "Softphone password (registrar auth)")) },
-                visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth(),
-            )
-            Text(t("Пусто = без пароля, регистрироваться может кто угодно. Задай пароль перед выходом в интернет и введи тот же пароль в софтфоне.",
-                "Empty = no password, anyone may register. Set one before exposing the gateway to the internet, and enter the same password in your softphone."),
-                style = MaterialTheme.typography.bodySmall)
-        }
-        Choice(t("SIP-стек", "SIP stack"), SipStack.entries, stack, { it.id }, info = "sip_stack") {
-            stack = it
-            // The built-in stack is UDP only.
-            if (it == SipStack.BUILTIN) transport = SipTransport.UDP
-        }
-        Choice(t("Транспорт", "Transport"), SipTransport.entries, transport, { it.id }, enabled = { !builtin || it == SipTransport.UDP }, info = "transport") {
-            // Follow the default port when it was still the previous transport's default.
-            if (port == transport.defaultPort.toString()) port = it.defaultPort.toString()
-            transport = it
-        }
-        Choice(t("SRTP (только TLS)", "SRTP (TLS only)"), SrtpPolicy.entries, srtp, { it.id }, enabled = { !builtin && transport == SipTransport.TLS }, info = "srtp") {
-            srtp = it
-        }
+        // Password, SIP stack, transport and SRTP are set by pairing (Security card) in 2.0:
+        // TLS 5063 with SRTP for paired phones, plain UDP only with "Allow other SIP apps".
         LabelWithInfo(if (serverMode) t("Внешняя АТС (необязательно в режиме «устройство в себе»)", "External PBX (optional in device-in-itself mode)") else t("Внешняя АТС", "External PBX"),
             "pbx", style = MaterialTheme.typography.bodySmall)
         Field(t("Адрес АТС (PBX host)", "PBX host"), server) { server = it }

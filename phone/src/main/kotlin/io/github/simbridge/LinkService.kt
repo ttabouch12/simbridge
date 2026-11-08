@@ -31,6 +31,8 @@ class LinkService : Service() {
         val n = core.notifier.statusNotification(core.status.value)
         val full = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         instance = this
+        if (LinkApp.core(this).prefs.webTexts) LinkApp.core(this).web.start()
+        UpdateCheck.maybeCheck(this)
         val fromUi = intent?.getBooleanExtra(EXTRA_UI, false) == true
         // Already running: only re-assert foreground when a visible screen can upgrade it, so a
         // background poke never downgrades microphone access we already hold.

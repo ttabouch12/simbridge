@@ -14,8 +14,35 @@ import android.telephony.SmsManager
 
 /** Number -> contact display name on this phone (needs READ_CONTACTS; returns null otherwise). */
 object ContactNames {
+    @Volatile private var synced: Map<String, String>? = null
+
+    private fun key(n: String) = n.filter(Char::isDigit).takeLast(9)
+
+    /** Names sent by the main phone (its contacts), kept in a private file on this phone. */
+    private fun syncedNames(ctx: Context): Map<String, String> = synced ?: runCatching {
+        val o = org.json.JSONObject(java.io.File(ctx.filesDir, "contacts.json").readText())
+        o.keys().asSequence().associateWith { o.getString(it) }
+    }.getOrDefault(emptyMap()).also { synced = it }
+
+    fun importFromPhone(ctx: Context, list: org.json.JSONArray?) {
+        list ?: return
+        val o = org.json.JSONObject()
+        for (i in 0 until minOf(list.length(), 20_000)) {
+            val e = list.optJSONObject(i) ?: continue
+            val k = key(e.optString("n")); if (k.length >= 3) o.put(k, e.optString("name").take(80))
+        }
+        java.io.File(ctx.filesDir, "contacts.json").writeText(o.toString())
+        synced = null
+        AppLog.i("contacts: ${o.length()} names from the main phone")
+    }
+
     fun lookup(ctx: Context, number: String?): String? {
         if (number.isNullOrBlank()) return null
+        val own = ownLookup(ctx, number)
+        return own ?: key(number).takeIf { it.length >= 3 }?.let { syncedNames(ctx)[it] }
+    }
+
+    private fun ownLookup(ctx: Context, number: String): String? {
         if (ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return null
         val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(number))
         return runCatching {

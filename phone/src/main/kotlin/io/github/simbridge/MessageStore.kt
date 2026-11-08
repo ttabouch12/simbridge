@@ -59,6 +59,10 @@ class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", 
         writableDatabase.update("m", ContentValues().apply { put("sys", sysId) }, "id=?", arrayOf(id.toString()))
     }
 
+    fun lastIncomingSim(key: String): Int? = readableDatabase.rawQuery(
+        "SELECT sim FROM m WHERE k=? AND out=0 AND sim>0 ORDER BY ts DESC LIMIT 1", arrayOf(key))
+        .use { if (it.moveToFirst()) it.getInt(0) else null }
+
     fun systemId(id: Long): Long? = readableDatabase.rawQuery("SELECT sys FROM m WHERE id=?", arrayOf(id.toString()))
         .use { if (it.moveToFirst()) it.getLong(0).takeIf { v -> v > 0 } else null }
 

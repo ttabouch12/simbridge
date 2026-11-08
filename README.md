@@ -13,6 +13,8 @@ Messages-style app, and can optionally be copied into your **default Messages ap
 between the two phones is **encrypted** (TLS + SRTP) and locked to the phones you paired with a QR code.
 
 [**⬇ Download the latest release**](../../releases/latest) ·
+[Get it with Obtainium](docs/stores/README.md#obtainium-works-now) ·
+[Compatibility list](docs/COMPATIBILITY.md) ·
 [How it works](#how-it-works) · [Setup](#setup) · [FAQ & troubleshooting](#troubleshooting) ·
 [Disclaimer](DISCLAIMER.md)
 
@@ -56,14 +58,17 @@ main phone only ever uses Wi-Fi. See the [disclaimer](DISCLAIMER.md).
 | 📥 **System SMS integration (optional)** | Make SimBridge the **default SMS app**: "Message" buttons in Contacts and other apps open it, the Phone app's *Reply with message* sends through the SIM, and texts are saved to Android's SMS database. Or keep Google Messages as default and just copy relayed texts into it (read-only). |
 | 📵 **Missed calls while offline** | Calls the SIM phone gets while the main phone is out of reach are added to the Phone app's history with a *Call back* notification. |
 | 🚫 **Call blocking** | Block numbers (and hidden callers). The SIM phone rejects them before they ring. With SimBridge as the default SMS app, numbers blocked in the Phone app are included too. |
-| 📶 **SIM phone dashboard** | Signal, network type, battery, data and hotspot of the SIM phone, plus **USSD codes** (balance, data left) and remote switches: battery saver, mobile data, hotspot (experimental), *Ring it* to find the SIM phone, *Restart link*. |
+| 📶 **SIM phone dashboard** | Its own tab, with a live picture of the SIM phone: signal and network for every SIM, battery, **data used** today and this month, **devices on its hotspot**, **network mode** (5G/4G/3G/2G), **APN** list and new APNs, **USSD codes**, **find my phone** (location on a map, or *Ring it*), and remote switches (battery saver, mobile data, hotspot, restart). |
+| 🍏 **iPhone and computers** | Any SIP app can use the SIM phone too: Linphone (iPhone, Mac, Windows, Linux) sets itself up from a QR code; Acrobits or Zoiper by hand. Texts also work in a **browser on your computer** (served by the main phone). |
+| 📼 **Carrier voicemail** | Unanswered calls are handed back to your carrier after 15, 25 or 40 seconds, so its voicemail or call forwarding takes them. |
+| 🌍 **7 languages** | English, Arabic, Farsi, French, Russian, Spanish and Turkish (main phone app). |
 | 🎙️ **Call recording** | A **Record** button in the call notification, or record every call. Recordings are saved on the main phone (Recordings/SimBridge). |
 | 📱📱 **Dual SIM and several main phones** | A dual-SIM gateway shows up as *SIM 1* and *SIM 2* calling accounts; texts reply on the line they came in on. Pair up to four main phones: calls ring on all of them, the first to answer gets the call. |
 | ⌚ **Watch and car friendly** | Conversation notifications work on Wear OS and Android Auto (read aloud, reply by voice). |
 | 💾 **Backup** | Export texts, blocked numbers and settings to a file, and import them on a new phone. |
 | 🔍 **Finds the SIM phone automatically** | mDNS/DNS-SD (`_simbridge._udp`), the last address that worked, and the hotspot's gateway address. No IP addresses to type. |
 | 🌙 **Quiet SIM phone** | While the main phone is connected, the SIM phone shows no call screen, its screen stays off and its call audio is muted. |
-| 🔋 **Ultimate power saver** | One switch on the SIM phone turns off Bluetooth, location and scanning, and puts every other app to sleep (in seconds). Optional extras: **no sounds**, **no vibration** and **keep the screen off**. Turning it off restores every setting exactly. |
+| 🔋 **Ultimate power saver** | One switch on the SIM phone turns off Bluetooth, location and scanning, and puts every other app to sleep (in seconds). Optional extras: **no sounds**, **no vibration**, **keep the screen off** and an **OLED saver** (black & white, dark theme, 60 Hz, lower resolution). Turning it off restores every setting exactly. |
 | 🔁 **Survives reboots** | Starts by itself. Status messages ("SIM phone restarted", "Shizuku stopped", "battery low", "unplugged") arrive as texts from "SimBridge Gateway". |
 | 🚫 **No root, no server** | Everything runs on the two phones. Nothing goes through the internet unless you set that up yourself. |
 
@@ -123,6 +128,9 @@ From the [latest release](../../releases/latest):
 |---|---|
 | `SimBridge-Gateway-<version>.apk` | the **SIM phone** |
 | `SimBridge-<version>.apk` | the **main phone** |
+| `SimBridge-FOSS-<version>.apk` | the **main phone**, without any Google code (pair with the camera app) |
+
+Also on [Obtainium, IzzyOnDroid, F-Droid, Yuki and Orion Store](docs/stores/README.md).
 
 Also needed on the **SIM phone**: **Shizuku**, either of:
 - [Shizuku by thedjchi](https://github.com/thedjchi/Shizuku/releases) (**recommended**: adds *start on
@@ -138,7 +146,7 @@ Optional, for setup by cable: [Android platform-tools (adb)](https://developer.a
 
 1. **Enable Developer options:** Settings → About phone → Software information → tap *Build number*
    7 times.
-2. **Install Shizuku** and start it with **Wireless debugging** (Shizuku shows the steps: Developer
+2. **Install Shizuku** (tips per phone maker: [Shizuku setup](docs/shizuku-setup.md)) and start it with **Wireless debugging** (Shizuku shows the steps: Developer
    options → Wireless debugging → *Pair device with pairing code*, then type the code into Shizuku's
    notification). In thedjchi's Shizuku, also turn on **Start on boot** and **Watchdog**.
    - On Android 17, allow Shizuku's *notifications* and *nearby devices / local network* prompts, or
@@ -253,7 +261,15 @@ adb shell dumpsys deviceidle whitelist +$P
   minute).
 - **Blocking:** *Settings → Blocked numbers*. Blocked calls are rejected by the SIM phone and logged
   as blocked; texts from blocked numbers are dropped.
-- **Backup:** *Settings → Backup → Export* saves a `.json` file you can *Import* on another phone.
+- **Backup:** *Settings → Backup → Export* saves a `.json` file (texts and pictures) you can *Import* on another phone.
+- **Dashboard tab:** network mode per SIM, APNs, data used, hotspot devices, *Locate* (opens the SIM
+  phone's position in Maps), *Calls → voicemail after N s*, and *Does it work on my phone?* (an audio
+  test call you can share to the [compatibility list](docs/COMPATIBILITY.md)).
+- **Texts on your computer:** *Settings → Texts on your computer* → turn on, open the address shown
+  in a browser on the same Wi-Fi, type the 6-digit code.
+- **iPhone / computer calls:** on the SIM phone, *Security → Use another SIP app* → scan the code
+  with Linphone (*Assistant → Fetch remote configuration*).
+- **Away from home:** see [remote access](docs/remote-access.md) (Tailscale or WireGuard).
 - **Status:** the chip at the top of SimBridge shows the connection. The SIM phone texts you (as
   *SimBridge Gateway*) if it restarted, Shizuku stopped, the battery is low or it was unplugged.
 - **After restarting or updating the main phone**, the first call shows *Your microphone is off for
@@ -271,9 +287,11 @@ adb shell dumpsys deviceidle whitelist +$P
 - **Google Messages can't send** without a SIM in the main phone. Reply from SimBridge (or make
   it the default SMS app).
 - **No call waiting or hold** for relayed calls.
-- **Local network only.** The phones must share a Wi-Fi network or the hotspot; the gateway refuses
-  requests from mobile-data and public addresses. To reach it from elsewhere, put both phones on your
-  own VPN (e.g. WireGuard/Tailscale).
+- **Local network only, unless you add a VPN.** The gateway refuses mobile-data and public addresses.
+  For use away from home, follow [remote access](docs/remote-access.md).
+- **iPhone SIP apps** only ring while open (iOS pauses apps without their own push service).
+- **APN and hotspot switches** depend on the phone maker; some refuse them.
+- The **SIM phone's own app** (SimBridge Gateway) is in English for now.
 - **Hotspot remote switch is experimental**: some phones don't let apps turn the hotspot on.
 - **Emergency calls** should be made from a phone with a SIM. Most phones can still place emergency
   calls without a SIM. SimBridge never handles emergency numbers.
@@ -352,7 +370,9 @@ SimBridge stands on the work of others. Thank you to:
   the softphone used while developing and testing the gateway.
 - **[ZXing](https://github.com/zxing/zxing)** (Apache-2.0): the pairing QR code on the SIM phone.
 - **Google code scanner** ([ML Kit / Play services](https://developers.google.com/ml-kit/vision/barcode-scanning/code-scanner)):
-  scanning that code on the main phone, without a camera permission.
+  scanning that code on the main phone, without a camera permission (not in the FOSS build).
+- **[Linphone](https://www.linphone.org/)** (Belledonne Communications): its remote-provisioning
+  format is used to set up SIP apps from a QR code. Linphone isn't bundled.
 - Android Jetpack (Compose, Material 3, Material Icons) and Kotlin coroutines.
 
 The full upstream commit history is kept in this repository. Upstream READMEs and docs are in

@@ -83,8 +83,8 @@ class SecureLinkTest {
         val inbox = CopyOnWriteArrayList<String>()
         ph.incomingMessageHandler = { from, name, text, meta -> inbox += "$from|$name|$text|${meta.sim}"; true }
         val phCtl = CopyOnWriteArrayList<String>(); val gwCtl = CopyOnWriteArrayList<String>()
-        ph.controlHandler = { phCtl += it }
-        gw.controlHandler = { gwCtl += it }
+        ph.controlHandler = { j, _ -> phCtl += j }
+        gw.controlHandler = { j, _ -> gwCtl += j }
         try {
             ph.start()
             assertTrue("phone registers over TLS", awaitReady(ph, 5000))
@@ -279,6 +279,14 @@ class SecureLinkTest {
             legB.get().hangup()
             repeat(100) { if (call.state != LegState.ENDED) Thread.sleep(20) }
             assertEquals(LegState.ENDED, call.state)
+
+            // A phone that disconnects is dropped at once, and texts report whether anyone got them.
+            val delivered = java.util.concurrent.LinkedBlockingQueue<Boolean>()
+            assertTrue(gw.sendMessage("1", "hi", null) { delivered.put(it) })
+            assertEquals(true, delivered.poll(5, TimeUnit.SECONDS))
+            a.stop(500)
+            repeat(100) { if (gw.registeredPhones != 1) Thread.sleep(20) }
+            assertEquals(1, gw.registeredPhones)
         } finally {
             a.stop(500); b.stop(500); gw.stop(500)
         }

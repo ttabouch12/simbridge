@@ -15,6 +15,7 @@ internal object QuietProfile {
     const val SOUND = 1
     const val VIBRATION = 2
     const val SCREEN = 4
+    const val OLED = 8
 
     private val SOUND_SETTINGS = listOf(
         "system" to "sound_effects_enabled", "system" to "dtmf_tone", "system" to "lockscreen_sounds_enabled",
@@ -51,6 +52,14 @@ internal object QuietProfile {
         Triple("system", "screen_off_timeout", "10000"),
     )
 
+    /** OLED saver: grayscale, 60 Hz. Dark mode and a lower resolution are handled separately. */
+    private val OLED_SETTINGS = listOf(
+        Triple("secure", "accessibility_display_daltonizer_enabled", "1"),
+        Triple("secure", "accessibility_display_daltonizer", "0"),       // 0 = monochrome
+        Triple("system", "peak_refresh_rate", "60.0"), Triple("system", "min_refresh_rate", "60.0"),
+        Triple("secure", "refresh_rate_mode", "0"),                      // Samsung: standard 60 Hz
+    )
+
     // Streams silenced for SOUND: system, ring, music, alarm, notification.
     private val STREAMS = listOf(1, 2, 3, 4, 5)
 
@@ -68,6 +77,7 @@ internal object QuietProfile {
             if (flags and SOUND != 0) addAll(SOUND_SETTINGS)
             if (flags and VIBRATION != 0) addAll(VIBRATION_SETTINGS)
             if (flags and SCREEN != 0) addAll(SCREEN_SETTINGS)
+            if (flags and OLED != 0) addAll(OLED_SETTINGS)
         }
         for ((ns, key, value) in wanted) {
             settings.put("$ns/$key", sh("settings", "get", ns, key).out.trim())
@@ -90,8 +100,27 @@ internal object QuietProfile {
             state.put("zen", sh("settings", "get", "global", "zen_mode").out.trim())
             sh("cmd", "notification", "set_dnd", "none")
         }
+        if (flags and OLED != 0) runCatching { oledOn(state) }.onFailure { Log.w(TAG, "OLED mode", it) }
         Log.i(TAG, "quiet mode ON (flags=$flags, ${wanted.size} settings)")
         return state.toString()
+    }
+
+    /** Dark theme and about 2/3 resolution (fewer pixels to draw); remembers what to restore. */
+    private fun oledOn(state: JSONObject) {
+        val night = sh("cmd", "uimode", "night").out
+        state.put("night", if ("yes" in night.lowercase()) "yes" else "no")
+        sh("cmd", "uimode", "night", "yes")
+        val size = sh("wm", "size").out; val density = sh("wm", "density").out
+        fun pick(out: String, label: String) = Regex("$label[^:]*:\\s*([0-9x]+)").find(out)?.groupValues?.get(1)
+        val physical = pick(size, "Physical") ?: return
+        state.put("sizeOverride", "Override" in size).put("size", pick(size, "Override") ?: physical)
+        val physDensity = pick(density, "Physical")
+        state.put("densityOverride", "Override" in density).put("density", pick(density, "Override") ?: physDensity ?: "")
+        val (w, h) = physical.split('x').map { it.toInt() }
+        if (w > 800) {
+            sh("wm", "size", "${w * 2 / 3}x${h * 2 / 3}")
+            physDensity?.toIntOrNull()?.let { sh("wm", "density", "${it * 2 / 3}") }
+        }
     }
 
     private fun disable(audio: android.media.AudioManager, saved: String) {
@@ -112,6 +141,11 @@ internal object QuietProfile {
         state.optJSONObject("volumes")?.let { v ->
             for (s in v.keys()) runCatching { audio.setStreamVolume(s.toInt(), v.optInt(s), 0) }
                 .onFailure { Log.w(TAG, "restore volume $s", it) }
+        }
+        if (state.has("night")) {
+            sh("cmd", "uimode", "night", if (state.optString("night") == "yes") "yes" else "no")
+            if (state.optBoolean("sizeOverride")) sh("wm", "size", state.optString("size")) else sh("wm", "size", "reset")
+            if (state.optBoolean("densityOverride")) sh("wm", "density", state.optString("density")) else sh("wm", "density", "reset")
         }
         Log.i(TAG, "quiet mode OFF (restored)")
     }
