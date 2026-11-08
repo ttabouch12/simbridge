@@ -76,6 +76,35 @@ class Prefs(context: Context) {
         get() = p.getStringSet("blocked", emptySet()).orEmpty().toSortedSet()
         set(v) = p.edit().putStringSet("blocked", v.toSet()).apply()
 
+    /** Home / work Wi-Fi networks (name, SSID, password), kept encrypted like the pairing. */
+    var places: List<Place>
+        get() = runCatching {
+            val a = org.json.JSONArray(p.getString("places", null)?.let { unseal(it) } ?: "[]")
+            (0 until a.length()).map { i -> a.getJSONObject(i).let { Place(it.optString("name"), it.optString("ssid"), it.optString("pw")) } }
+        }.getOrDefault(emptyList())
+        set(v) = p.edit().putString("places", seal(org.json.JSONArray(v.map {
+            org.json.JSONObject().put("name", it.name).put("ssid", it.ssid).put("pw", it.password) }).toString())).apply()
+
+    var placesAuto: Boolean
+        get() = p.getBoolean("places_auto", false)
+        set(v) = p.edit().putBoolean("places_auto", v).apply()
+
+    /** Copy one-time codes from texts to the clipboard automatically. */
+    var otpCopy: Boolean
+        get() = p.getBoolean("otp_copy", true)
+        set(v) = p.edit().putBoolean("otp_copy", v).apply()
+
+    /** Remote screen: 0 fast, 1 balanced, 2 sharp; panel kept dark; sound forwarded. */
+    var remoteQuality: Int
+        get() = p.getInt("remote_quality", 1)
+        set(v) = p.edit().putInt("remote_quality", v).apply()
+    var remoteDark: Boolean
+        get() = p.getBoolean("remote_dark", true)
+        set(v) = p.edit().putBoolean("remote_dark", v).apply()
+    var remoteSound: Boolean
+        get() = p.getBoolean("remote_sound", false)
+        set(v) = p.edit().putBoolean("remote_sound", v).apply()
+
     /** The SIM phone's VPN address for use away from home (Tailscale/WireGuard), or blank. */
     var remoteHost: String
         get() = p.getString("remote_host", "") ?: ""

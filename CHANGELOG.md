@@ -1,5 +1,39 @@
 # Changelog
 
+## SimBridge 2.3.0
+
+Update both apps. Pairing is kept.
+
+### Main phone
+- **Dashboard is the home screen.** Swipe between Messages, Overview, Controls, USSD, Data, Places
+  and Speed; the tabs sit at the bottom, within thumb reach. Settings also swipes between its tabs.
+- **Control the SIM phone's screen**, scrcpy-style: hardware H.264 video and direct touch input over
+  one encrypted, tamper-proof (AES-GCM) connection on the LAN.
+  - The SIM phone's screen can stay dark while you control it.
+  - Quality presets (Fast / Balanced / Sharp), optional sound, screenshots, full screen.
+  - Buttons for back, home, recent apps, volume, power and typing.
+  - Blind PIN unlock: the lock screen is hidden from screen capture, so the PIN is typed for you.
+- **USSD like the phone's own dialer:** the network's answer appears in a popup-style card, and menus
+  can be answered (Reply / Cancel). Works on networks that refuse background USSD ("-1").
+- **Home and work Wi-Fi:** pick networks saved on the SIM phone or nearby, edit them, hidden password.
+  When the main phone sees one, the SIM phone joins it and turns its hotspot off; when it leaves, the
+  hotspot comes back.
+- **Speed test:** ping, download and upload between the phones, and to the internet.
+- **Missed calls** on the Overview with call back; **home-screen widget** with link state, battery
+  and signal.
+- **One-time codes** in texts are copied for your keyboard to paste, with a *Copy* button in the
+  notification.
+- **Mobile data details:** 30 days per day and the apps that used most.
+- Switches show a spinner and confirm at once; colored on/off badges.
+- Fixed: the same text could arrive twice after a reconnect.
+
+### SIM phone (gateway)
+- **Remote hotspot fixed** (it was refused as "no permission"); a clear message when the phone can't
+  host a hotspot while it is on Wi-Fi.
+- **Low-battery alerts** at 20 % and 10 %, sent to the main phone.
+- New control operations for the features above (screen stream, USSD menus, saved Wi-Fi networks,
+  data detail, speed test).
+
 ## SimBridge 2.2.0
 
 ### Main phone
@@ -14,6 +48,9 @@
 
 ## SimBridge 2.1.0
 
+Updating from 2.0 keeps the pairing. Coming from 1.x? Pair once with the QR code (see 2.0.0 below,
+which 2.1 includes).
+
 ### Main phone
 - **New layout:** Messages, Dashboard and Settings tabs.
 - **Dashboard** with a live picture of the SIM phone: every SIM (number, carrier, eSIM, signal),
@@ -25,8 +62,11 @@
 - **Caller names on the SIM phone** (contact names sent from the main phone; can be turned off).
 - **Away from home:** optional VPN address of the SIM phone (Tailscale / WireGuard).
 - **Update check** once a day (off in the FOSS build).
-- **Languages:** Arabic, Farsi, French, Russian, Spanish, Turkish (and English); per-app language.
-- **FOSS build** without Google code, for F-Droid.
+- **Languages:** Arabic, Farsi, French, Russian, Spanish, Turkish (and English), with right-to-left
+  layout and a per-app language setting (Android settings → Apps → SimBridge → Language).
+- **FOSS build** (`SimBridge-FOSS`) without Google code, for F-Droid: pair by scanning the code with the
+  camera app or by pasting the link.
+- **Contacts & remote access** and **Updates** cards in Settings.
 - Backups now include pictures.
 
 ### SIM phone (gateway)
@@ -34,6 +74,14 @@
   account details for others. Calls ring on every registered app and phone.
 - **OLED saver** in the power saver: dark theme and 60 Hz.
 - Remote network mode, APN, location and hotspot-device list for the dashboard.
+- Usage access and location are granted through Shizuku automatically.
+- Shows caller names from the main phone's contacts in its own alerts.
+
+### Docs and distribution
+- Guides: [Shizuku setup by phone maker](docs/shizuku-setup.md), [remote access](docs/remote-access.md),
+  [compatibility list](docs/COMPATIBILITY.md) with a GitHub report template.
+- Store listings (fastlane) and [store guide](docs/stores/README.md): Obtainium, IzzyOnDroid,
+  F-Droid, Yuki, Orion Store.
 
 ### Fixes
 - Texts and missed-call alerts are no longer lost while the main phone is away: anything a phone
@@ -44,6 +92,10 @@
 - Old SIP stack, transport and SRTP settings that no longer did anything were removed; the unused
   native pjsua2 module was deleted.
 - Replies (status, USSD) go only to the phone that asked.
+- OLED saver: early test builds also switched to black & white and a lower resolution, which could
+  leave the screen unreadable. It is now dark theme and 60 Hz only, and turning it off undoes the
+  older changes.
+- Tests for the MMS encoder/decoder, phone-number matching, keep-alives and dropped connections.
 
 
 ## SimBridge 2.0.0

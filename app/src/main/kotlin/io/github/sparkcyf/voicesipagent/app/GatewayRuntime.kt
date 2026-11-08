@@ -94,6 +94,8 @@ data class HealthState(
 class GatewayRuntime private constructor(context: Context) {
     private val app = context.applicationContext
     private val worker = newWorker()
+    /** Runs [block] on the gateway worker thread (control, SIP, privileged calls). */
+    fun worker(block: () -> Unit) = worker.execute(block)
     val settingsStore = SettingsStore(app)
     private val _settings = MutableStateFlow(settingsStore.load())
     val settingsFlow: StateFlow<GatewaySettings> = _settings
@@ -198,6 +200,7 @@ class GatewayRuntime private constructor(context: Context) {
     fun start() = worker.execute {
         if (started) return@execute
         started = true
+        watchBattery()
         cellular.onCallsChanged = { snapshot ->
             _health.update { it.copy(calls = snapshot, inCallServiceBound = CellularEndpoint.isInCallServiceBound) }
             worker.execute {
@@ -905,6 +908,29 @@ class GatewayRuntime private constructor(context: Context) {
         }
         if (sent) AppLog.i("SMS forwarded to the registered phone")
         else { AppLog.w("SMS kept: no phone registered"); control.keepSms(from, text, sim) }
+    }
+
+    /**
+     * Low-battery alerts to the main phone: once at 20 % and once at 10 % per discharge, reset when
+     * the charger is connected. Sent as a gateway text, so it waits in the queue if the link is down.
+     */
+    private fun watchBattery() {
+        val prefs = app.getSharedPreferences("control", Context.MODE_PRIVATE)
+        app.registerReceiver(object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, i: android.content.Intent) {
+                val level = i.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1)
+                val scale = i.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
+                if (level < 0) return
+                val pct = level * 100 / scale
+                val plugged = i.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0
+                val warned = prefs.getInt("battery_warned", 100)
+                when {
+                    plugged -> if (warned != 100) prefs.edit().putInt("battery_warned", 100).apply()
+                    pct <= 10 && warned > 10 -> { prefs.edit().putInt("battery_warned", 10).apply(); alerts.post("🪫 The SIM phone battery is at $pct %. Plug it in soon, or calls and texts stop.") }
+                    pct <= 20 && warned > 20 -> { prefs.edit().putInt("battery_warned", 20).apply(); alerts.post("🔋 The SIM phone battery is at $pct %.") }
+                }
+            }
+        }, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
     }
 
     /** Main phone -> cellular SMS through this phone's SIM. Failures come back to the main phone as an alert. */

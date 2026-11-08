@@ -7,10 +7,21 @@ second Android phone without a SIM (the **main phone**). Calls and texts on the 
 to the main phone, and the main phone makes calls and sends texts through the SIM, either over the SIM
 phone's own hotspot or over any Wi-Fi network the two phones share.
 
-On the main phone it feels native. Calls ring in the **system Phone app**, with its call screen, call
-history, contact names and keypad. Texts, picture messages and group chats appear in a Google
-Messages-style app, and can optionally be copied into your **default Messages app** too. Everything
-between the two phones is **encrypted** (TLS + SRTP) and locked to the phones you paired with a QR code.
+On the main phone it feels native. Calls ring in the **system Phone app** in HD voice, with its call
+screen, call history, contact names and keypad. Texts, picture messages and group chats appear in a
+Google Messages-style app, and can optionally be copied into your **default Messages app** too. A
+**Dashboard** tab shows the SIM phone live (signal, battery, data used, hotspot devices) and controls
+it remotely: network mode, APN, USSD codes, mobile data, find my phone. Everything between the phones
+is **encrypted** (TLS + SRTP) and locked to the phones you paired with a QR code.
+
+It also works beyond one Android phone: **iPhones and computers** can use the SIM through Linphone or
+any SIP app, texts open in a **browser on your computer**, several main phones can ring at once, and
+a VPN (Tailscale / WireGuard) makes it work **away from home**. Available in English, Arabic, Farsi,
+French, Russian, Spanish and Turkish.
+
+**New in 2.1:** tabs and the SIM phone dashboard, SIP apps (iPhone, PC), texts in a browser, carrier
+voicemail, an audio self-test, 7 languages, a Google-free build, and no more lost texts while the main
+phone is away. See the [changelog](CHANGELOG.md).
 
 Talking to someone in another language? **Live call translation** shows the caller's words in your
 language in a floating window during the call, and can speak your words to them in theirs: 19
@@ -62,7 +73,11 @@ main phone only ever uses Wi-Fi. See the [disclaimer](DISCLAIMER.md).
 | 📥 **System SMS integration (optional)** | Make SimBridge the **default SMS app**: "Message" buttons in Contacts and other apps open it, the Phone app's *Reply with message* sends through the SIM, and texts are saved to Android's SMS database. Or keep Google Messages as default and just copy relayed texts into it (read-only). |
 | 📵 **Missed calls while offline** | Calls the SIM phone gets while the main phone is out of reach are added to the Phone app's history with a *Call back* notification. |
 | 🚫 **Call blocking** | Block numbers (and hidden callers). The SIM phone rejects them before they ring. With SimBridge as the default SMS app, numbers blocked in the Phone app are included too. |
-| 📶 **SIM phone dashboard** | Its own tab, with a live picture of the SIM phone: signal and network for every SIM, battery, **data used** today and this month, **devices on its hotspot**, **network mode** (5G/4G/3G/2G), **APN** list and new APNs, **USSD codes**, **find my phone** (location on a map, or *Ring it*), and remote switches (battery saver, mobile data, hotspot, restart). |
+| 📶 **SIM phone dashboard** | The home screen (swipe between pages), with a live picture of the SIM phone: signal and network for every SIM, battery, **data used** today and this month, **devices on its hotspot**, **network mode** (5G/4G/3G/2G), **APN** list and new APNs, **USSD codes** with menu replies, **find my phone** (location on a map, or *Ring it*), and remote switches (battery saver, mobile data, hotspot, restart). |
+| 🖥️ **Remote screen** | See and control the SIM phone from the main phone, scrcpy-style: live H.264 video, touch, keys, volume and power, optional sound, screenshots, full screen. Its own screen can stay dark. Encrypted and tamper-proof on the LAN. |
+| 🏠 **Home and work Wi-Fi** | When the main phone sees a saved network, both phones move to it and the hotspot turns off; it comes back when you leave. |
+| 🔑 **One-time codes** | Codes in incoming texts are copied for your keyboard, with a *Copy* button in the notification. |
+| ⚡ **Speed test, widget, missed calls** | Ping and speed between the phones and to the internet; a home-screen widget with link, battery and signal; recent missed calls with call back. |
 | 🍏 **iPhone and computers** | Any SIP app can use the SIM phone too: Linphone (iPhone, Mac, Windows, Linux) sets itself up from a QR code; Acrobits or Zoiper by hand. Texts also work in a **browser on your computer** (served by the main phone). |
 | 📼 **Carrier voicemail** | Unanswered calls are handed back to your carrier after 15, 25 or 40 seconds, so its voicemail or call forwarding takes them. |
 | 🌍 **7 languages** | English, Arabic, Farsi, French, Russian, Spanish and Turkish (main phone app). |
@@ -365,6 +380,10 @@ call's audio and text: tell the caller where the law requires it.
 - *New key* on the SIM phone unpairs every main phone at once (e.g. if one was lost).
 - *Allow other SIP apps* (off by default) re-opens plain SIP/UDP on port 5062 for softphones like
   baresip. It's unencrypted: leave it off unless you need it.
+- **Remote screen:** the SIM phone opens a socket only after a request over the paired TLS link,
+  for one connection, with a fresh random key. The main phone proves the key, and every frame (video,
+  sound, touches) is AES-GCM sealed with a counter nonce, so frames can't be read, altered or replayed
+  on the Wi-Fi. The PIN for blind unlock is never stored.
 - Shizuku grants powerful system access to apps you approve. Only approve apps you trust.
 - Tests: `sip/src/test` checks SRTP against the RFC 3711 test vectors, tamper and replay rejection,
   pinned-TLS registration, refusal of wrong keys and passwords, forged UDP requests, HD voice and

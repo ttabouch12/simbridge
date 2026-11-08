@@ -288,9 +288,12 @@ class LinkCore(val context: Context) {
             number == "gateway" -> "SimBridge Gateway"
             else -> number
         }
+        // The SIM phone resends a text when it got no confirmation, even if the first copy arrived.
+        if (store.isRecentDuplicate(address, text)) { Log.i("duplicate text dropped"); return }
         val time = System.currentTimeMillis()
         val id = store.add(address, text, outgoing = false, status = Msg.RECEIVED, time = time, sim = sim)
         if (number != "gateway") mirror(id, address, text, time, outgoing = false)
+        if (prefs.otpCopy) Otp.find(text)?.let { Otp.copy(context, it) }
         notifier.showMessages(MessageStore.keyOf(address), address)
     }
 

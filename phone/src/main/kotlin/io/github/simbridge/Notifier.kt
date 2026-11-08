@@ -109,6 +109,14 @@ class Notifier(private val context: Context, private val core: LinkCore) {
             .setColor(0xFF1A73E8.toInt())
             .setContentIntent(openApp(key, key.hashCode()))
             .addAction(reply).addAction(read)
+            .apply {
+                // "Copy 482913" for one-time codes.
+                unread.lastOrNull()?.let { Otp.find(it.body) }?.let { code ->
+                    addAction(Notification.Action.Builder(null, context.getString(R.string.copy_code, code),
+                        PendingIntent.getBroadcast(context, key.hashCode() + 2, Intent(context, OtpReceiver::class.java).putExtra("code", code),
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)).build())
+                }
+            }
             .setAutoCancel(true)
             .setWhen(unread.last().time)
             .build()

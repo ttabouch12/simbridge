@@ -59,6 +59,11 @@ class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", 
         writableDatabase.update("m", ContentValues().apply { put("sys", sysId) }, "id=?", arrayOf(id.toString()))
     }
 
+    /** True if the same text from [address] already arrived within [windowMs] (a resend, not a new text). */
+    fun isRecentDuplicate(address: String, body: String, windowMs: Long = 15 * 60_000L): Boolean = readableDatabase.rawQuery(
+        "SELECT 1 FROM m WHERE k=? AND out=0 AND body=? AND ts>? LIMIT 1",
+        arrayOf(keyOf(address), body, (System.currentTimeMillis() - windowMs).toString())).use { it.moveToFirst() }
+
     fun lastIncomingSim(key: String): Int? = readableDatabase.rawQuery(
         "SELECT sim FROM m WHERE k=? AND out=0 AND sim>0 ORDER BY ts DESC LIMIT 1", arrayOf(key))
         .use { if (it.moveToFirst()) it.getInt(0) else null }

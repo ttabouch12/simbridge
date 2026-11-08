@@ -15,8 +15,8 @@ android {
         applicationId = "io.github.simbridge.gateway"
         minSdk = 30
         targetSdk = 36
-        versionCode = 420
-        versionName = "2.1.0"
+        versionCode = 440
+        versionName = "2.3.0"
         // Filter all transitive JNI libraries as well as PJSIP's own module outputs.
         ndk {
             //abiFilters += listOf("arm64-v8a", "x86_64")

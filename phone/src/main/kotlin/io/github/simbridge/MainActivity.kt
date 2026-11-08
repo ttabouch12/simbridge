@@ -34,10 +34,11 @@ sealed interface Screen {
     data object SimPhone : Screen
     data object Blocked : Screen
     data object Recordings : Screen
+    data object Remote : Screen
 }
 
 class MainActivity : ComponentActivity() {
-    private val screen = mutableStateOf<Screen>(Screen.List)
+    private val screen = mutableStateOf<Screen>(Screen.SimPhone)
     private val pendingPair = mutableStateOf<PairedGateway?>(null)
 
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -57,33 +58,32 @@ class MainActivity : ComponentActivity() {
             LinkTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
                     val s by screen
-                    BackHandler(enabled = s != Screen.List) {
-                        screen.value = if (s == Screen.Blocked || s == Screen.Recordings) Screen.Settings else Screen.List
+                    BackHandler(enabled = s != Screen.List && s != Screen.SimPhone) {
+                        screen.value = when (s) {
+                            Screen.Blocked, Screen.Recordings -> Screen.Settings
+                            is Screen.Chat, Screen.NewChat -> Screen.List
+                            else -> Screen.SimPhone
+                        }
                     }
                     io.github.simbridge.ui.ConfirmPairing(core, pendingPair.value) { pendingPair.value = null }
-                    val tab = s == Screen.List || s == Screen.SimPhone || s == Screen.Settings
-                    androidx.compose.material3.Scaffold(
-                        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0),
-                        bottomBar = { if (tab) io.github.simbridge.ui.BottomTabs(s) { screen.value = it } },
-                    ) { tabPad ->
-                    androidx.compose.foundation.layout.Box(Modifier.padding(bottom = tabPad.calculateBottomPadding())) {
                     AnimatedContent(s, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "nav") { cur ->
                         when (cur) {
-                            Screen.List -> ConversationsScreen(core,
-                                onOpen = { k, a -> screen.value = Screen.Chat(k, a) },
-                                onNew = { screen.value = Screen.NewChat },
-                                onSettings = { screen.value = Screen.Settings })
-                            Screen.SimPhone -> io.github.simbridge.ui.SimPhoneScreen(core)
+                            // Home: the dashboard pager; "List" opens it on the Messages page.
+                            Screen.List, Screen.SimPhone -> io.github.simbridge.ui.SimPhoneScreen(core,
+                                onRemote = { screen.value = Screen.Remote },
+                                onSettings = { screen.value = Screen.Settings },
+                                onOpenChat = { k, a -> screen.value = Screen.Chat(k, a) },
+                                onNewChat = { screen.value = Screen.NewChat },
+                                startPage = if (cur == Screen.List) 0 else 1)
+                            Screen.Remote -> io.github.simbridge.ui.RemoteScreen(core) { screen.value = Screen.SimPhone }
                             is Screen.Chat -> ChatScreen(core, cur.key, cur.address, cur.draft) { screen.value = Screen.List }
                             Screen.NewChat -> NewChatScreen(core, { screen.value = Screen.List }) { k, a -> screen.value = Screen.Chat(k, a) }
                             Screen.Settings -> SettingsScreen(core, onSimPhone = { screen.value = Screen.SimPhone },
                                 onBlocked = { screen.value = Screen.Blocked },
-                                onRecordings = { screen.value = Screen.Recordings }, onBack = null)
+                                onRecordings = { screen.value = Screen.Recordings }, onBack = { screen.value = Screen.SimPhone })
                             Screen.Recordings -> io.github.simbridge.ui.RecordingsScreen { screen.value = Screen.Settings }
                             Screen.Blocked -> io.github.simbridge.ui.BlockedScreen(core) { screen.value = Screen.Settings }
                         }
-                    }
-                    }
                     }
                 }
             }
@@ -124,6 +124,7 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.RECORD_AUDIO, Manifest.permission.READ_CONTACTS, Manifest.permission.POST_NOTIFICATIONS,
             Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE, Manifest.permission.NEARBY_WIFI_DEVICES,
             "android.permission.ACCESS_LOCAL_NETWORK", Manifest.permission.READ_CALL_LOG, Manifest.permission.WRITE_CALL_LOG,
+            Manifest.permission.ACCESS_FINE_LOCATION,
         ).filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (wanted.isNotEmpty()) permissions.launch(wanted.toTypedArray())
     }

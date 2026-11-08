@@ -33,6 +33,9 @@ class LinkService : Service() {
         instance = this
         if (LinkApp.core(this).prefs.webTexts) LinkApp.core(this).web.start()
         UpdateCheck.maybeCheck(this)
+        if (placesJob == null) placesJob = scope.launch {
+            while (true) { kotlinx.coroutines.delay(60_000); runCatching { Places.check(this@LinkService, LinkApp.core(this@LinkService)) } }
+        }
         val fromUi = intent?.getBooleanExtra(EXTRA_UI, false) == true
         // Already running: only re-assert foreground when a visible screen can upgrade it, so a
         // background poke never downgrades microphone access we already hold.
@@ -53,6 +56,9 @@ class LinkService : Service() {
             val nm = getSystemService(NotificationManager::class.java)
             core.status.collect { nm.notify(Notifier.ID_STATUS, core.notifier.statusNotification(it)) }
         }
+        if (widgetJob == null) widgetJob = scope.launch {
+            kotlinx.coroutines.flow.combine(core.status, core.control.status) { _, _ -> }.collect { LinkWidget.update(this@LinkService) }
+        }
         return START_STICKY
     }
 
@@ -72,6 +78,9 @@ class LinkService : Service() {
             .onSuccess { micReady = true; Log.i("service: microphone granted for the call") }
             .onFailure { Log.w("service: microphone refused in the background"); LinkApp.core(this).notifier.micBlocked() }
     }
+
+    private var placesJob: kotlinx.coroutines.Job? = null
+    private var widgetJob: kotlinx.coroutines.Job? = null
 
     override fun onDestroy() {
         if (instance === this) instance = null

@@ -33,6 +33,25 @@ internal object RemoteActions {
             if (r.exit == 0) "mobile data ${if (on) "on" else "off"}" else "error: ${r.out.trim()}"
         }
         "hotspot" -> hotspot(ctx, arg == "on")
+        "screen-stream" -> ScreenStream.start(arg)
+        "screen-stop" -> ScreenStream.stop()
+        "ussd-dial" -> ussdDial(arg)
+        "ussd-reply" -> ussdAnswer(arg)
+        "ussd-cancel" -> { ussdButton("button2") || run { ShellEnv.run("input", "keyevent", "KEYCODE_BACK"); true }; "ok" }
+        // Networks saved on this phone, one SSID per line.
+        "wifi-saved" -> ShellEnv.run("cmd", "wifi", "list-networks").out.lineSequence().drop(1)
+            .mapNotNull { l -> l.trim().split(Regex("\\s{2,}")).getOrNull(1)?.takeIf { it.isNotBlank() } }.distinct().joinToString("\n")
+        // "ssid\npassword" (empty password: open network).
+        "wifi-connect" -> {
+            val (ssid, pw) = arg.split('\n', limit = 2).let { it[0] to it.getOrElse(1) { "" } }
+            require(ssid.length in 1..32 && pw.length <= 63 && '\n' !in pw) { "bad network" }
+            ShellEnv.run("svc", "wifi", "enable")
+            // No password: the network is saved on this phone, which joins it once Wi-Fi is on.
+            if (pw.isEmpty()) return "connecting"
+            val r = ShellEnv.run("cmd", "wifi", "connect-network", ssid, "wpa2", pw)
+            if (r.exit == 0) "connecting" else "error: ${r.out.trim()}"
+        }
+        "wifi-ssid" -> Regex("connected to \"([^\"]*)\"").find(ShellEnv.run("cmd", "wifi", "status").out)?.groupValues?.get(1).orEmpty()
         // Make [arg] (this app, or the previous holder when restoring) the default SMS app.
         "sms-role" -> {
             require(PKG.matches(arg)) { "bad package" }
@@ -98,7 +117,8 @@ internal object RemoteActions {
      * some vendors block it. Uses the hotspot settings already saved on the phone.
      */
     private fun hotspot(ctx: Context, on: Boolean): String {
-        val tm = ctx.getSystemService("tethering") ?: return "error: no tethering service"
+        val tm = runCatching { shellTethering(ctx) }.onFailure { Log.w(TAG, "own TetheringManager failed", it) }.getOrNull()
+            ?: ctx.getSystemService("tethering") ?: return "error: no tethering service"
         val cls = tm.javaClass
         if (!on) {
             cls.getMethod("stopTethering", Int::class.javaPrimitiveType).invoke(tm, 0)
@@ -106,6 +126,10 @@ internal object RemoteActions {
         }
         val builder = Class.forName("android.net.TetheringManager\$TetheringRequest\$Builder")
             .getConstructor(Int::class.javaPrimitiveType).newInstance(0)
+        // Skip the carrier "may you tether?" check: on many phones it fails or waits for a dialog
+        // nobody sees, so the hotspot never starts. The shell user holds TETHER_PRIVILEGED.
+        runCatching { builder.javaClass.getMethod("setExemptFromEntitlementCheck", Boolean::class.javaPrimitiveType).invoke(builder, true) }
+        runCatching { builder.javaClass.getMethod("setShouldShowEntitlementUi", Boolean::class.javaPrimitiveType).invoke(builder, false) }
         val request = builder.javaClass.getMethod("build").invoke(builder)
         val cbType = Class.forName("android.net.TetheringManager\$StartTetheringCallback")
         val result = AtomicReference("error: no answer")
@@ -113,7 +137,14 @@ internal object RemoteActions {
         val cb = Proxy.newProxyInstance(cbType.classLoader, arrayOf(cbType)) { _, m, args ->
             when (m.name) {
                 "onTetheringStarted" -> { result.set("hotspot on"); done.countDown() }
-                "onTetheringFailed" -> { result.set("error: tethering failed (${args?.firstOrNull()})"); done.countDown() }
+                "onTetheringFailed" -> {
+                    val code = args?.firstOrNull()
+                    // 5 = the Wi-Fi chip refused; most phones cannot host a hotspot while joined to Wi-Fi.
+                    val wifi = Regex("connected to \"([^\"]*)\"").find(ShellEnv.run("cmd", "wifi", "status").out)?.groupValues?.get(1)
+                    result.set(if (code == 5 && !wifi.isNullOrEmpty()) "error: the SIM phone is on Wi-Fi ($wifi); turn its Wi-Fi off first"
+                        else "error: tethering failed ($code)")
+                    done.countDown()
+                }
             }
             null
         }
@@ -122,5 +153,92 @@ internal object RemoteActions {
         done.await(8, TimeUnit.SECONDS)
         Log.i(TAG, "hotspot: ${result.get()}")
         return result.get()
+    }
+
+
+    /**
+     * USSD the way the dialer does it, for networks that reject the background USSD API ("-1"):
+     * dial the code, read the answer from the phone's USSD dialog, close it. [arg] = "slot:code".
+     */
+    private fun ussdDial(arg: String): String {
+        val (slot, code) = arg.split(':', limit = 2).let { it[0].toInt() to it[1] }
+        require(Regex("[0-9*#+]{2,40}").matches(code)) { "bad code" }
+        ShellEnv.run("input", "keyevent", "KEYCODE_WAKEUP")
+        ShellEnv.run("am", "start", "-a", "android.intent.action.CALL", "-d", "tel:" + code.replace("#", "%23"),
+            "--ei", "com.android.phone.extra.slot", slot.toString(), "--ei", "simSlot", slot.toString(), "--ei", "slot", slot.toString())
+        return awaitUssd(null)
+    }
+
+    /** Types [arg] into the open USSD menu and presses Send. */
+    private fun ussdAnswer(arg: String): String {
+        require(Regex("[0-9*#+]{1,40}").matches(arg)) { "bad reply" }
+        val xml = dump()
+        val before = ussdText(xml)
+        val field = nodes(xml).firstOrNull { attr(it, "class") == "android.widget.EditText" } ?: return "error: no USSD menu is open"
+        center(field)?.let { (x, y) -> ShellEnv.run("input", "tap", "$x", "$y") }
+        ShellEnv.run("input", "text", arg)
+        if (!ussdButton("button1")) ShellEnv.run("input", "keyevent", "KEYCODE_ENTER")
+        return awaitUssd(before)
+    }
+
+    /** Waits for a new, stable USSD dialog text (not [previous]); leaves menus open, closes final answers. */
+    private fun awaitUssd(previous: String?): String {
+        val deadline = System.currentTimeMillis() + 25_000
+        var last = ""
+        while (System.currentTimeMillis() < deadline) {
+            Thread.sleep(1000)
+            val xml = dump()
+            val text = ussdText(xml)?.takeIf { it != previous } ?: continue
+            if (text == last) {          // stable twice in a row: the network's answer, not "Running USSD…"
+                val menu = nodes(xml).any { attr(it, "class") == "android.widget.EditText" }
+                if (menu) return "session:$text"
+                if (!ussdButton("button1")) ShellEnv.run("input", "keyevent", "KEYCODE_BACK")
+                return text
+            }
+            last = text
+        }
+        return if (last.isNotEmpty()) last else "error: no answer from the network"
+    }
+
+    private fun dump() = ShellEnv.run("sh", "-c", "uiautomator dump /data/local/tmp/sb_ui.xml >/dev/null && cat /data/local/tmp/sb_ui.xml", timeoutSec = 8).out
+
+    private val PHONE_PKG = Regex("package=\"(com\\.android\\.phone|com\\.samsung[^\"]*tele[^\"]*|com\\.android\\.mms[^\"]*)\"")
+    private fun nodes(xml: String) = Regex("<node [^>]*>").findAll(xml).map { it.value }.filter { PHONE_PKG.containsMatchIn(it) }.toList()
+    private fun attr(n: String, k: String) = Regex("$k=\"([^\"]*)\"").find(n)?.groupValues?.get(1).orEmpty()
+    private fun center(n: String) = Regex("\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]").find(attr(n, "bounds"))?.groupValues
+        ?.let { g -> (g[1].toInt() + g[3].toInt()) / 2 to (g[2].toInt() + g[4].toInt()) / 2 }
+
+    /** Taps the USSD dialog's button1 (Send/OK) or button2 (Cancel). */
+    private fun ussdButton(id: String): Boolean {
+        val n = nodes(dump()).firstOrNull { attr(it, "resource-id").endsWith("id/$id") } ?: return false
+        val (x, y) = center(n) ?: return false
+        ShellEnv.run("input", "tap", "$x", "$y")
+        return true
+    }
+
+    /** The message of a USSD dialog in a uiautomator dump, if one is showing. */
+    internal fun ussdText(xml: String): String? {
+        val nodes = nodes(xml)
+        val msg = nodes.firstOrNull { attr(it, "resource-id").endsWith("id/message") }?.let { attr(it, "text") }
+            ?: nodes.filter { attr(it, "class") != "android.widget.EditText" }.map { attr(it, "text") }.filter { it.length > 12 }.maxByOrNull { it.length }
+        return msg?.takeIf { it.isNotBlank() }?.replace("&#10;", "\n")?.replace("&amp;", "&")?.replace("&lt;", "<")?.replace("&gt;", ">")?.replace("&quot;", "\"")?.replace("&apos;", "'")
+    }
+
+    /**
+     * A TetheringManager that names "com.android.shell" as the caller. The system one reports this
+     * helper's context package, which does not match the shell uid, so tethering answers error 14
+     * (no permission) even though the shell holds TETHER_PRIVILEGED.
+     */
+    private fun shellTethering(ctx: Context): Any {
+        val shellCtx = object : android.content.ContextWrapper(ctx) {
+            override fun getOpPackageName() = "com.android.shell"
+            override fun getPackageName() = "com.android.shell"
+            override fun getAttributionTag(): String? = null
+            override fun getApplicationContext(): Context = this
+        }
+        val getService = Class.forName("android.os.ServiceManager").getMethod("getService", String::class.java)
+        val ctor = Class.forName("android.net.TetheringManager")
+            .getDeclaredConstructor(Context::class.java, java.util.function.Supplier::class.java).apply { isAccessible = true }
+        return ctor.newInstance(shellCtx, java.util.function.Supplier { getService.invoke(null, "tethering") as android.os.IBinder })
     }
 }

@@ -37,6 +37,14 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
         when (o.optString("op")) {
             "status" -> send(status(), from)
             "ussd" -> ussd(o.optString("code"), o.optInt("sim", 0).takeIf { it > 0 }, from)
+            "ussd-reply" -> rt.worker { ussdReply("", privilegedRaw("ussd-reply", o.optString("text").take(40)), from) }
+            "ussd-cancel" -> rt.worker { privilegedRaw("ussd-cancel", "") }
+            "speed-start" -> {
+                val token = java.util.UUID.randomUUID().toString().replace("-", "")
+                runCatching { SpeedServer.start(token) }.onSuccess {
+                    send(JSONObject().put("op", "speed-ready").put("port", SpeedServer.PORT).put("token", token), from)
+                }.onFailure { AppLog.w("speed test: ${it.message}") }
+            }
             "control" -> control(o.optString("action"), o.optBoolean("on", true), from)
             "block-rules" -> saveRules(o)
             "mms-send" -> MmsGateway.sendFromPhone(app, o) { st, detail -> o.optString("ref").ifBlank { null }?.let { smsStatus(it, st, detail) } }
@@ -55,6 +63,13 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
             "locate" -> locate(from)
             "voicemail" -> { prefs.edit().putInt("no_answer_sec", o.optInt("seconds").coerceIn(0, 120)).apply(); send(status(), from) }
             "contacts" -> ContactNames.importFromPhone(app, o.optJSONArray("list"))
+            "data-detail" -> send(dataDetail(), from)
+            "screen-start" -> screenStart(o.optInt("w", 1080), o.optInt("bitrate", 6_000_000), o.optInt("flags", 1), from)
+            "screen-stop" -> privilegedRaw("screen-stop", "")
+            "wifi-saved" -> send(JSONObject().put("op", "wifi-saved").put("list",
+                JSONArray(privilegedRaw("wifi-saved", "").takeUnless { it.startsWith("error") }.orEmpty().lines().filter { it.isNotBlank() })), from)
+            "places" -> prefs.edit().putString("places", o.toString()).apply()
+            "at-place" -> atPlace(o.optString("ssid"), o.optString("pw"), from)
             else -> AppLog.w("control: unknown op ${o.optString("op").take(20)}")
         }
     }
@@ -190,6 +205,8 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
         o.put("noAnswerSec", noAnswerSec)
         if (hasPhoneState()) runCatching { app.getSystemService(TelephonyManager::class.java).voiceMailNumber }.getOrNull()?.let { o.put("voicemail", it) }
         o.put("model", "${android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${android.os.Build.MODEL}")
+        // Marketing name ("Galaxy A56 5G") for the phone picture on the dashboard.
+        runCatching { android.provider.Settings.Global.getString(app.contentResolver, "device_name") }.getOrNull()?.let { o.put("deviceName", it) }
         o.put("android", android.os.Build.VERSION.RELEASE)
         dataUsage()?.let { (today, month) -> o.put("dataToday", today).put("dataMonth", month) }
         o.put("clients", hotspotClients())
@@ -304,26 +321,34 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
     @SuppressLint("MissingPermission")
     private fun ussd(code: String, sim: Int?, from: java.net.InetSocketAddress?) {
         val clean = code.trim()
-        fun reply(ok: Boolean, text: String) = send(JSONObject().put("op", "ussd-result").put("code", clean).put("ok", ok).put("text", text), from)
-        if (!Regex("[0-9*#+]{2,40}").matches(clean) || !clean.endsWith("#")) { reply(false, "Not a USSD code"); return }
+        if (!Regex("[0-9*#+]{2,40}").matches(clean) || !clean.endsWith("#")) { ussdReply(clean, "error: Not a USSD code", from); return }
+        AppLog.i("control: USSD request")
+        // Like the dialer: dial the code and read the network's dialog, so menus can be answered.
+        if (rt.shizuku.service != null) { rt.worker { ussdReply(clean, privilegedRaw("ussd-dial", "${(sim ?: 1) - 1}:$clean"), from) }; return }
+        // Without Shizuku: the background USSD API (single answers only).
         if (app.checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
-            reply(false, "The SIM phone needs the Phone permission"); return
+            ussdReply(clean, "error: The SIM phone needs the Phone permission", from); return
         }
         val base = app.getSystemService(TelephonyManager::class.java)
         val tm = sim?.let { Sims.subIdForSlot(app, it) }?.let { runCatching { base.createForSubscriptionId(it) }.getOrNull() } ?: base
-        AppLog.i("control: USSD request")
         main.post {
             runCatching {
                 tm.sendUssdRequest(clean, object : TelephonyManager.UssdResponseCallback() {
-                    override fun onReceiveUssdResponse(t: TelephonyManager, request: String, response: CharSequence) {
-                        reply(true, response.toString())
-                    }
-                    override fun onReceiveUssdResponseFailed(t: TelephonyManager, request: String, failureCode: Int) {
-                        reply(false, "The network did not answer ($failureCode)")
-                    }
+                    override fun onReceiveUssdResponse(t: TelephonyManager, request: String, response: CharSequence) =
+                        ussdReply(clean, response.toString(), from)
+                    override fun onReceiveUssdResponseFailed(t: TelephonyManager, request: String, failureCode: Int) =
+                        ussdReply(clean, "error: The network did not answer ($failureCode)", from)
                 }, main)
-            }.onFailure { reply(false, it.message ?: "USSD failed") }
+            }.onFailure { ussdReply(clean, "error: ${it.message ?: "USSD failed"}", from) }
         }
+    }
+
+    /** [r]: the dialog text, "session:" + text when the network waits for a reply, or "error: …". */
+    private fun ussdReply(code: String, r: String, from: java.net.InetSocketAddress?) {
+        val err = r.startsWith("error")
+        val session = r.startsWith("session:")
+        send(JSONObject().put("op", "ussd-result").put("code", code).put("ok", !err).put("session", session)
+            .put("text", r.removePrefix("error: ").removePrefix("session:")), from)
     }
 
     // ------------------------------------------------------------ remote switches
@@ -337,15 +362,127 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
             "restart" -> rt.restartSip()
             else -> return
         }
-        // Report the new state once things settle.
-        main.postDelayed({ send(status(), from) }, if (action == "hotspot") 6000 else 2500)
+        if (action !in setOf("mobile-data", "hotspot"))
+            send(JSONObject().put("op", "control-result").put("action", action).put("ok", true), from)
+        // Report the new state now, and again once things settle.
+        send(status(), from)
+        main.postDelayed({ send(status(), from) }, if (action == "hotspot") 4000 else 1500)
     }
 
+    /** Runs a privileged action and always reports the outcome, so the phone's spinner stops. */
     private fun privileged(action: String, arg: String) {
-        val svc = rt.shizuku.service
-        val r = if (svc == null) "error: Shizuku is not running" else runCatching { svc.remoteAction(action, arg) }.getOrElse { "error: ${it.message}" }
+        val r = privilegedRaw(action, arg)
         AppLog.i("control: $action -> $r")
-        if (r.startsWith("error")) send(JSONObject().put("op", "control-result").put("action", action).put("ok", false).put("text", r.removePrefix("error: ")))
+        send(JSONObject().put("op", "control-result").put("action", action).put("ok", !r.startsWith("error")).put("text", r.removePrefix("error: ")))
+    }
+
+    private fun privilegedRaw(action: String, arg: String): String {
+        val svc = rt.shizuku.service ?: return "error: Shizuku is not running"
+        return runCatching { svc.remoteAction(action, arg) }.getOrElse { "error: ${it.message}" }
+    }
+
+    // ------------------------------------------------------------ remote screen
+
+    /** Opens the encrypted screen stream socket and tells the phone where and with which key. */
+    private fun screenStart(w: Int, bitRate: Int, flags: Int, from: java.net.InetSocketAddress?) {
+        val rnd = java.security.SecureRandom()
+        fun hex() = ByteArray(16).also(rnd::nextBytes).joinToString("") { "%02x".format(it) }
+        val key = hex(); val ivd = hex(); val ivu = hex()
+        val port = 5066
+        val r = privilegedRaw("screen-stream", "$port $key $ivd $ivu $w $bitRate $flags")
+        if (r.startsWith("error")) {
+            send(JSONObject().put("op", "control-result").put("action", "screen").put("ok", false).put("text", r.removePrefix("error: ")), from)
+            return
+        }
+        send(JSONObject().put("op", "screen-ready").put("port", port).put("key", key).put("ivd", ivd).put("ivu", ivu), from)
+    }
+
+    // ------------------------------------------------------------ home / work Wi-Fi
+
+    /**
+     * The main phone sees a saved place's Wi-Fi: join it here too and turn the hotspot off, so
+     * both phones meet on that network. When this phone loses Wi-Fi again, the hotspot comes back.
+     */
+    private fun atPlace(ssid: String, pw: String, from: java.net.InetSocketAddress?) {
+        if (ssid.isBlank()) return
+        if (privilegedRaw("wifi-ssid", "") == ssid) { leaveHotspot(ssid, from); return }
+        val r = privilegedRaw("wifi-connect", "$ssid\n$pw")
+        AppLog.i("control: at-place -> $r")
+        if (r.startsWith("error")) return
+        main.postDelayed({ rt.worker { if (privilegedRaw("wifi-ssid", "") == ssid) leaveHotspot(ssid, from) } }, 10_000)
+    }
+
+    private fun leaveHotspot(ssid: String, from: java.net.InetSocketAddress?) {
+        prefs.edit().putString("at_place", ssid).apply()
+        if (hotspotOn()) privileged("hotspot", "off")
+        watchWifiLoss()
+        send(status(), from)
+    }
+
+    private var wifiWatch: android.net.ConnectivityManager.NetworkCallback? = null
+
+    private fun watchWifiLoss() {
+        if (wifiWatch != null) return
+        val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
+        val req = android.net.NetworkRequest.Builder().addTransportType(android.net.NetworkCapabilities.TRANSPORT_WIFI).build()
+        wifiWatch = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onLost(network: android.net.Network) {
+                val auto = runCatching { JSONObject(prefs.getString("places", "{}")!!).optBoolean("auto", true) }.getOrDefault(true)
+                if (prefs.getString("at_place", "").isNullOrEmpty() || !auto) return
+                // Brief drops happen; only act if Wi-Fi stays gone.
+                main.postDelayed({ rt.worker {
+                    if (privilegedRaw("wifi-ssid", "").isEmpty()) {
+                        prefs.edit().remove("at_place").apply()
+                        AppLog.i("control: left place, hotspot back on")
+                        privileged("hotspot", "on")
+                    }
+                } }, 20_000)
+            }
+        }
+        runCatching { cm.registerNetworkCallback(req, wifiWatch!!) }
+    }
+
+    // ------------------------------------------------------------ data usage detail
+
+    /** Mobile bytes per day for the last 30 days and the top apps over the same period. */
+    private fun dataDetail(): JSONObject {
+        val o = JSONObject().put("op", "data-detail")
+        runCatching {
+            val nsm = app.getSystemService(android.app.usage.NetworkStatsManager::class.java)
+            val cal = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+                add(java.util.Calendar.DAY_OF_MONTH, -29)
+            }
+            val start = cal.timeInMillis
+            val days = JSONArray()
+            repeat(30) {
+                val from = cal.timeInMillis
+                cal.add(java.util.Calendar.DAY_OF_MONTH, 1)
+                val b = nsm.querySummaryForDevice(android.net.ConnectivityManager.TYPE_MOBILE, null, from, minOf(cal.timeInMillis, System.currentTimeMillis()))
+                days.put(JSONObject().put("day", from).put("bytes", b.rxBytes + b.txBytes))
+            }
+            o.put("days", days)
+            val perUid = HashMap<Int, Long>()
+            nsm.querySummary(android.net.ConnectivityManager.TYPE_MOBILE, null, start, System.currentTimeMillis()).use { st ->
+                val b = android.app.usage.NetworkStats.Bucket()
+                while (st.hasNextBucket()) { st.getNextBucket(b); perUid.merge(b.uid, b.rxBytes + b.txBytes, Long::plus) }
+            }
+            val pm = app.packageManager
+            o.put("apps", JSONArray().apply {
+                perUid.entries.sortedByDescending { it.value }.take(10).forEach { (uid, bytes) ->
+                    val name = when (uid) {
+                        android.app.usage.NetworkStats.Bucket.UID_TETHERING -> "Hotspot"
+                        android.app.usage.NetworkStats.Bucket.UID_REMOVED -> "Removed apps"
+                        android.os.Process.SYSTEM_UID -> "System"
+                        else -> pm.getPackagesForUid(uid)?.firstOrNull()?.let { p ->
+                            runCatching { pm.getApplicationLabel(pm.getApplicationInfo(p, 0)).toString() }.getOrDefault(p)
+                        } ?: "uid $uid"
+                    }
+                    put(JSONObject().put("name", name).put("bytes", bytes))
+                }
+            })
+        }.onFailure { AppLog.w("control: data detail failed: ${it.message}") }
+        return o
     }
 }
 

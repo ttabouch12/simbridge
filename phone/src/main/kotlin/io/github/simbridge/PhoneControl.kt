@@ -30,6 +30,7 @@ data class GatewayStatus(
     val version: String,
     val sims: List<SimInfo>,
     val model: String = "",
+    val deviceName: String = "",
     val androidVersion: String = "",
     val dataToday: Long? = null,
     val dataMonth: Long? = null,
@@ -56,6 +57,7 @@ data class GatewayStatus(
                 } }
             },
             model = o.optString("model"),
+            deviceName = o.optString("deviceName"),
             androidVersion = o.optString("android"),
             dataToday = if (o.has("dataToday")) o.optLong("dataToday") else null,
             dataMonth = if (o.has("dataMonth")) o.optLong("dataMonth") else null,
@@ -69,7 +71,8 @@ data class GatewayStatus(
     }
 }
 
-data class UssdReply(val code: String, val ok: Boolean, val text: String, val at: Long = System.currentTimeMillis())
+/** A USSD answer; [session] = the network waits for a menu choice. */
+data class UssdReply(val code: String, val ok: Boolean, val text: String, val session: Boolean = false, val at: Long = System.currentTimeMillis())
 
 /**
  * The main phone's side of the SimBridge control channel: asks the SIM phone for its status,
@@ -96,17 +99,25 @@ class PhoneControl(private val core: LinkCore) {
         val o = runCatching { JSONObject(json) }.getOrNull() ?: return
         when (o.optString("op")) {
             "status" -> _status.value = GatewayStatus.parse(o).also {
+                settle(it)
                 Telecom.syncSims(ctx, it.sims)
                 Log.i("SIM phone: battery ${it.battery}% data=${it.dataOn} hotspot=${it.hotspot} saver=${it.powerSaver} " +
                     it.sims.joinToString { s -> "SIM${s.slot} ${s.network} level ${s.level}" })
             }
-            "ussd-result" -> _ussd.value = UssdReply(o.optString("code"), o.optBoolean("ok"), o.optString("text")).also {
+            "ussd-result" -> _ussd.value = UssdReply(o.optString("code"), o.optBoolean("ok"), o.optString("text"), o.optBoolean("session")).also {
                 Log.i("USSD ${if (it.ok) "answered" else "failed"} (${it.text.length} chars)")
             }
-            "control-result" -> if (!o.optBoolean("ok", true)) _notice.value = "${o.optString("action")}: ${o.optString("text")}"
+            "control-result" -> {
+                clearPending(o.optString("action"))
+                if (!o.optBoolean("ok", true)) _notice.value = "${o.optString("action")}: ${o.optString("text")}"
+            }
             "sms-status" -> smsStatus(o.optString("ref"), o.optString("status"))
             "missed", "blocked" -> callEvent(o)
             "mms" -> core.onIncomingMms(o)
+            "data-detail" -> _dataDetail.value = DataDetail.parse(o)
+            "screen-ready" -> _screen.value = ScreenOffer.parse(o)
+            "speed-ready" -> _speed.value = o.optInt("port") to o.optString("token")
+            "wifi-saved" -> _savedWifi.value = (o.optJSONArray("list") ?: JSONArray()).let { a -> (0 until a.length()).map { a.getString(it) } }
             "apns" -> _apns.value = (o.optJSONArray("list") ?: JSONArray()).let { a ->
                 (0 until a.length()).map { i -> a.getJSONObject(i).let {
                     Apn(it.optLong("id"), it.optString("name"), it.optString("apn"), it.optString("type"), it.optBoolean("preferred"))
@@ -126,6 +137,10 @@ class PhoneControl(private val core: LinkCore) {
 
     fun refresh() = send(JSONObject().put("op", "status"))
 
+    /** Answers a USSD menu (the reply goes into the SIM phone's USSD dialog). */
+    fun ussdReply(text: String): Boolean { _ussd.value = null; return send(JSONObject().put("op", "ussd-reply").put("text", text)) }
+    fun ussdCancel() { _ussd.value = null; send(JSONObject().put("op", "ussd-cancel")) }
+
     fun ussd(code: String, sim: Int?): Boolean {
         _ussd.value = null
         return send(JSONObject().put("op", "ussd").put("code", code).apply { sim?.let { put("sim", it) } })
@@ -135,7 +150,71 @@ class PhoneControl(private val core: LinkCore) {
         send(JSONObject().put("op", "mms-send").put("to", JSONArray(to)).put("text", text).put("parts", parts).put("ref", ref)
             .apply { if (sim > 0) put("sim", sim) })
 
-    fun networkMode(sim: Int, mode: String) = send(JSONObject().put("op", "network-mode").put("sim", sim).put("mode", mode))
+    fun networkMode(sim: Int, mode: String): Boolean {
+        markPending("net:$sim", mode)
+        return send(JSONObject().put("op", "network-mode").put("sim", sim).put("mode", mode))
+    }
+
+    // ---- pending actions: what the user asked for, shown at once, until the SIM phone confirms
+
+    private val _pending = MutableStateFlow<Map<String, Any>>(emptyMap())
+    /** action -> wanted value, while the SIM phone hasn't confirmed it yet. */
+    val pending: StateFlow<Map<String, Any>> = _pending
+
+    private fun markPending(key: String, value: Any) {
+        _pending.value = _pending.value + (key to value)
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ clearPending(key) }, 20_000)
+    }
+
+    fun clearPending(key: String) { _pending.value = _pending.value - key }
+
+    /** Drops pending actions the new status confirms. */
+    private fun settle(s: GatewayStatus) {
+        val done = _pending.value.filter { (k, v) ->
+            when (k) {
+                "power-saver" -> s.powerSaver == v
+                "mobile-data" -> s.dataOn == v
+                "hotspot" -> s.hotspot == v
+                else -> k.startsWith("net:") && s.sims.firstOrNull { "net:${it.slot}" == k }?.mode == v
+            }
+        }.keys
+        if (done.isNotEmpty()) _pending.value = _pending.value - done
+    }
+
+    // ---- detailed data usage
+
+    private val _dataDetail = MutableStateFlow<DataDetail?>(null)
+    val dataDetail: StateFlow<DataDetail?> = _dataDetail
+    fun loadDataDetail() = send(JSONObject().put("op", "data-detail"))
+
+    // ---- remote screen
+
+    /** Speed test server on the SIM phone: port and one-time token. */
+    private val _speed = MutableStateFlow<Pair<Int, String>?>(null)
+    val speed: StateFlow<Pair<Int, String>?> = _speed
+    fun startSpeed(): Boolean { _speed.value = null; return send(JSONObject().put("op", "speed-start")) }
+
+    private val _screen = MutableStateFlow<ScreenOffer?>(null)
+    val screen: StateFlow<ScreenOffer?> = _screen
+    /** [flags]: 1 = keep the SIM phone's panel dark, 2 = forward its sound. */
+    fun startScreen(maxWidth: Int, bitRate: Int, flags: Int): Boolean {
+        _screen.value = null
+        return send(JSONObject().put("op", "screen-start").put("w", maxWidth).put("bitrate", bitRate).put("flags", flags))
+    }
+    fun stopScreen() { _screen.value = null; send(JSONObject().put("op", "screen-stop")) }
+
+    /** Wi-Fi networks saved on the SIM phone (for picking a home/work network). */
+    private val _savedWifi = MutableStateFlow<List<String>>(emptyList())
+    val savedWifi: StateFlow<List<String>> = _savedWifi
+    fun loadSavedWifi() = send(JSONObject().put("op", "wifi-saved"))
+
+    // ---- places (home / work Wi-Fi)
+
+    fun pushPlaces() = send(JSONObject().put("op", "places").put("auto", core.prefs.placesAuto)
+        .put("list", org.json.JSONArray(core.prefs.places.map { JSONObject().put("name", it.name).put("ssid", it.ssid).put("pw", it.password) })))
+
+    /** The main phone sees a saved place's Wi-Fi: ask the SIM phone to join it and drop the hotspot. */
+    fun atPlace(p: Place) = send(JSONObject().put("op", "at-place").put("ssid", p.ssid).put("pw", p.password))
     fun loadApns() = send(JSONObject().put("op", "apn-list"))
     fun selectApn(id: Long) = send(JSONObject().put("op", "apn-select").put("id", id))
     fun addApn(name: String, apn: String, mcc: String, mnc: String, user: String, password: String) =
@@ -187,7 +266,10 @@ class PhoneControl(private val core: LinkCore) {
         }.start()
     }
 
-    fun control(action: String, on: Boolean) = send(JSONObject().put("op", "control").put("action", action).put("on", on))
+    fun control(action: String, on: Boolean): Boolean {
+        markPending(action, on)
+        return send(JSONObject().put("op", "control").put("action", action).put("on", on)).also { if (!it) clearPending(action) }
+    }
 
     /** Sends this phone's block list (its own plus Android's blocked numbers, when readable). */
     fun pushBlockRules() {
@@ -250,3 +332,24 @@ class PhoneControl(private val core: LinkCore) {
         runCatching { ctx.contentResolver.insert(CallLog.Calls.CONTENT_URI, v) }.onFailure { Log.w("call log write failed", it) }
     }
 }
+
+/** Mobile data per day (last 30 days, oldest first) and the apps that used most this month. */
+data class DataDetail(val days: List<Pair<Long, Long>>, val apps: List<Pair<String, Long>>) {
+    companion object {
+        fun parse(o: JSONObject) = DataDetail(
+            (o.optJSONArray("days") ?: JSONArray()).let { a -> (0 until a.length()).map { i -> a.getJSONObject(i).let { it.optLong("day") to it.optLong("bytes") } } },
+            (o.optJSONArray("apps") ?: JSONArray()).let { a -> (0 until a.length()).map { i -> a.getJSONObject(i).let { it.optString("name") to it.optLong("bytes") } } },
+        )
+    }
+}
+
+/** One screenshot of the SIM phone (JPEG) and the real screen size, for remote control. */
+/** Where and with which one-time key to open the SIM phone's screen stream. */
+class ScreenOffer(val port: Int, val key: String, val ivDown: String, val ivUp: String) {
+    companion object {
+        fun parse(o: JSONObject) = ScreenOffer(o.optInt("port"), o.optString("key"), o.optString("ivd"), o.optString("ivu"))
+    }
+}
+
+/** A Wi-Fi network where both phones should use Wi-Fi instead of the hotspot. */
+data class Place(val name: String, val ssid: String, val password: String)
