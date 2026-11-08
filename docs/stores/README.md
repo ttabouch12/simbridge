@@ -17,7 +17,7 @@ One-tap links for the README: `obtainium://add/https://github.com/ttabouch12/sim
 Open an issue at https://gitlab.com/IzzyOnDroid/repo/-/issues with the template *Request for
 inclusion*, giving the repo URL and both package names (`io.github.simbridge.gateway`,
 `io.github.simbridge`). Mention the FOSS APK for the main phone. Izzy reads the fastlane metadata
-from the repo. Expect anti-features: none for the FOSS build; *NonFreeDep* for the scanner build.
+from the repo. Expect anti-features: *NonFreeNet* for both (optional cloud call translation, off by default); *NonFreeDep* for the full build (Google scanner and ML Kit). The full build is arm64 only.
 
 ## F-Droid (builds from source)
 Submit a merge request to https://gitlab.com/fdroid/fdroiddata adding the two files in

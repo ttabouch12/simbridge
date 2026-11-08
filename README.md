@@ -12,10 +12,14 @@ history, contact names and keypad. Texts, picture messages and group chats appea
 Messages-style app, and can optionally be copied into your **default Messages app** too. Everything
 between the two phones is **encrypted** (TLS + SRTP) and locked to the phones you paired with a QR code.
 
+Talking to someone in another language? **Live call translation** shows the caller's words in your
+language in a floating window during the call, and can speak your words to them in theirs: 19
+languages, free cloud engines or fully on-device.
+
 [**⬇ Download the latest release**](../../releases/latest) ·
 [Get it with Obtainium](docs/stores/README.md#obtainium-works-now) ·
 [Compatibility list](docs/COMPATIBILITY.md) ·
-[How it works](#how-it-works) · [Setup](#setup) · [FAQ & troubleshooting](#troubleshooting) ·
+[How it works](#how-it-works) · [Setup](#setup) · [Call translation](#call-translation) · [FAQ & troubleshooting](#troubleshooting) ·
 [Disclaimer](DISCLAIMER.md)
 
 <p align="center">
@@ -62,6 +66,7 @@ main phone only ever uses Wi-Fi. See the [disclaimer](DISCLAIMER.md).
 | 🍏 **iPhone and computers** | Any SIP app can use the SIM phone too: Linphone (iPhone, Mac, Windows, Linux) sets itself up from a QR code; Acrobits or Zoiper by hand. Texts also work in a **browser on your computer** (served by the main phone). |
 | 📼 **Carrier voicemail** | Unanswered calls are handed back to your carrier after 15, 25 or 40 seconds, so its voicemail or call forwarding takes them. |
 | 🌍 **7 languages** | English, Arabic, Farsi, French, Russian, Spanish and Turkish (main phone app). |
+| 🌍 **Live call translation** | Captions of the caller's words in your language, in a floating window over the call screen. Optionally your words are spoken to them in their language. 19 languages (Turkish, English, Arabic, Persian, Russian, French, German, Spanish…). Free engines: Groq, Cerebras, Google Gemini, or on-device (Google ML Kit). See [Call translation](#call-translation). |
 | 🎙️ **Call recording** | A **Record** button in the call notification, or record every call. Recordings are saved on the main phone (Recordings/SimBridge). |
 | 📱📱 **Dual SIM and several main phones** | A dual-SIM gateway shows up as *SIM 1* and *SIM 2* calling accounts; texts reply on the line they came in on. Pair up to four main phones: calls ring on all of them, the first to answer gets the call. |
 | ⌚ **Watch and car friendly** | Conversation notifications work on Wear OS and Android Auto (read aloud, reply by voice). |
@@ -296,6 +301,28 @@ adb shell dumpsys deviceidle whitelist +$P
 - **Emergency calls** should be made from a phone with a SIM. Most phones can still place emergency
   calls without a SIM. SimBridge never handles emergency numbers.
 - The SIM phone must stay **powered and in range**: it is the phone line.
+
+## Call translation
+
+*Main phone → Settings → Call translation.*
+
+1. Pick **Caller speaks** and **I speak**.
+2. Paste a free **Groq** key (https://console.groq.com/keys). Groq is used for speech recognition (Whisper) and, by default, for translation.
+3. Choose what each call starts with: **Off**, **Captions** (you read the caller's words in your language) or **Captions + voice** (also, your words are spoken to the caller in their language, instead of your own voice).
+4. During a call, tap the floating translate button (allow *Display over other apps*) or **Translate** in the call notification. You can change the mode during the call.
+
+| Engine | Speed | Accuracy | Key |
+|---|---|---|---|
+| Groq GPT-OSS 120B (default) | fast | high | Groq |
+| Groq GPT-OSS 20B | fastest | a bit lower | Groq |
+| Cerebras GPT-OSS 120B | fast | high | free, https://cloud.cerebras.ai |
+| Google Gemini 2.5 Flash-Lite | slower | most natural for less common languages | free, https://aistudio.google.com/apikey (Google may use free-tier data) |
+| On-device (Google ML Kit) | instant, offline | lowest | none (not in the FOSS build) |
+
+Each line takes about 1–2 s after the speaker pauses. *On-device only* keeps all audio on the phone
+(Android's offline recognizer + ML Kit), with lower accuracy. For **Captions + voice**, install the
+caller's language under *Settings → System → Languages → Text-to-speech*. Cloud engines receive the
+call's audio and text: tell the caller where the law requires it.
 
 ## Troubleshooting
 

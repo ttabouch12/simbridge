@@ -6,5 +6,6 @@
 <li>Dashboard of the SIM phone: signal, battery, data used, hotspot devices, USSD codes, network mode, APN, find my phone, remote switches.</li>
 <li>Missed calls while offline, call blocking, call recording, dual SIM, several main phones, Wear OS / Android Auto, backup.</li>
 <li>Texts in a browser on your computer.</li>
+<li>Live call translation: captions of the caller's words in your language in a floating window, and optionally your words spoken to them in theirs. 19 languages; free cloud engines (Groq, Cerebras, Gemini) or on-device.</li>
 </ul>
 <p>Needs SimBridge Gateway and Shizuku on the SIM phone. See the README for setup.</p>
