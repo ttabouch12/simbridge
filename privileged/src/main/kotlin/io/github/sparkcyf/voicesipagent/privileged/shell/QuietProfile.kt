@@ -52,10 +52,8 @@ internal object QuietProfile {
         Triple("system", "screen_off_timeout", "10000"),
     )
 
-    /** OLED saver: grayscale, 60 Hz. Dark mode and a lower resolution are handled separately. */
+    /** OLED saver: dark theme (set separately) and 60 Hz. No grayscale or resolution change: they made screens unreadable. */
     private val OLED_SETTINGS = listOf(
-        Triple("secure", "accessibility_display_daltonizer_enabled", "1"),
-        Triple("secure", "accessibility_display_daltonizer", "0"),       // 0 = monochrome
         Triple("system", "peak_refresh_rate", "60.0"), Triple("system", "min_refresh_rate", "60.0"),
         Triple("secure", "refresh_rate_mode", "0"),                      // Samsung: standard 60 Hz
     )
@@ -105,22 +103,12 @@ internal object QuietProfile {
         return state.toString()
     }
 
-    /** Dark theme and about 2/3 resolution (fewer pixels to draw); remembers what to restore. */
+    /** Dark theme (black pixels are off on OLED); remembers what to restore. */
     private fun oledOn(state: JSONObject) {
         val night = sh("cmd", "uimode", "night").out
         state.put("night", if ("yes" in night.lowercase()) "yes" else "no")
         sh("cmd", "uimode", "night", "yes")
-        val size = sh("wm", "size").out; val density = sh("wm", "density").out
-        fun pick(out: String, label: String) = Regex("$label[^:]*:\\s*([0-9x]+)").find(out)?.groupValues?.get(1)
-        val physical = pick(size, "Physical") ?: return
-        state.put("sizeOverride", "Override" in size).put("size", pick(size, "Override") ?: physical)
-        val physDensity = pick(density, "Physical")
-        state.put("densityOverride", "Override" in density).put("density", pick(density, "Override") ?: physDensity ?: "")
-        val (w, h) = physical.split('x').map { it.toInt() }
-        if (w > 800) {
-            sh("wm", "size", "${w * 2 / 3}x${h * 2 / 3}")
-            physDensity?.toIntOrNull()?.let { sh("wm", "density", "${it * 2 / 3}") }
-        }
+
     }
 
     private fun disable(audio: android.media.AudioManager, saved: String) {
@@ -144,8 +132,11 @@ internal object QuietProfile {
         }
         if (state.has("night")) {
             sh("cmd", "uimode", "night", if (state.optString("night") == "yes") "yes" else "no")
-            if (state.optBoolean("sizeOverride")) sh("wm", "size", state.optString("size")) else sh("wm", "size", "reset")
-            if (state.optBoolean("densityOverride")) sh("wm", "density", state.optString("density")) else sh("wm", "density", "reset")
+            // Older 2.1 builds also changed resolution and grayscale: undo those if they were saved.
+            if (state.has("size")) {
+                if (state.optBoolean("sizeOverride")) sh("wm", "size", state.optString("size")) else sh("wm", "size", "reset")
+                if (state.optBoolean("densityOverride")) sh("wm", "density", state.optString("density")) else sh("wm", "density", "reset")
+            }
         }
         Log.i(TAG, "quiet mode OFF (restored)")
     }

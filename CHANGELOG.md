@@ -20,7 +20,7 @@
 ### SIM phone (gateway)
 - **Any SIP app** (Linphone on iPhone/Mac/Windows/Linux, Acrobits, Zoiper): QR setup for Linphone,
   account details for others. Calls ring on every registered app and phone.
-- **OLED saver** in the power saver: black & white, dark theme, 60 Hz, lower resolution.
+- **OLED saver** in the power saver: dark theme and 60 Hz.
 - Remote network mode, APN, location and hotspot-device list for the dashboard.
 
 ### Fixes

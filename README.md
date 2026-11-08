@@ -68,7 +68,7 @@ main phone only ever uses Wi-Fi. See the [disclaimer](DISCLAIMER.md).
 | 💾 **Backup** | Export texts, blocked numbers and settings to a file, and import them on a new phone. |
 | 🔍 **Finds the SIM phone automatically** | mDNS/DNS-SD (`_simbridge._udp`), the last address that worked, and the hotspot's gateway address. No IP addresses to type. |
 | 🌙 **Quiet SIM phone** | While the main phone is connected, the SIM phone shows no call screen, its screen stays off and its call audio is muted. |
-| 🔋 **Ultimate power saver** | One switch on the SIM phone turns off Bluetooth, location and scanning, and puts every other app to sleep (in seconds). Optional extras: **no sounds**, **no vibration**, **keep the screen off** and an **OLED saver** (black & white, dark theme, 60 Hz, lower resolution). Turning it off restores every setting exactly. |
+| 🔋 **Ultimate power saver** | One switch on the SIM phone turns off Bluetooth, location and scanning, and puts every other app to sleep (in seconds). Optional extras: **no sounds**, **no vibration**, **keep the screen off** and an **OLED saver** (dark theme, 60 Hz). Turning it off restores every setting exactly. |
 | 🔁 **Survives reboots** | Starts by itself. Status messages ("SIM phone restarted", "Shizuku stopped", "battery low", "unplugged") arrive as texts from "SimBridge Gateway". |
 | 🚫 **No root, no server** | Everything runs on the two phones. Nothing goes through the internet unless you set that up yourself. |
 

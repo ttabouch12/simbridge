@@ -215,7 +215,7 @@ fun ModernScreen(rt: GatewayRuntime, setTakeover: (Boolean) -> Unit, openAdvance
                         quiet, 2, rt::setQuietFlags)
                     QuietRow(Icons.Rounded.MobileOff, "Keep the screen off", "No Always On Display, lift/tap to wake or notification wake-ups",
                         quiet, 4, rt::setQuietFlags)
-                    QuietRow(Icons.Rounded.MobileOff, "OLED saver", "Black & white, dark theme, 60 Hz and a lower resolution",
+                    QuietRow(Icons.Rounded.MobileOff, "OLED saver", "Dark theme and 60 Hz",
                         quiet, 8, rt::setQuietFlags)
                     SwitchRow(Icons.Rounded.VolumeOff, "Keep this phone silent during calls",
                         "The call is heard only on the main phone", cur.muteEarpiece, { rt.setMuteEarpiece(it) })
