@@ -79,6 +79,17 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
     @Volatile private var recorder: CallRecorder? = null
     private val label: String get() = leg.remote.number?.takeIf { it.isNotBlank() } ?: leg.target ?: ""
     val isRecording get() = recorder != null
+    /** Live translation of this call, for CaptionActivity's mode buttons. */
+    val translator get() = audio.translator
+
+    private fun startTranslator() {
+        if (audio.translator != null) return
+        val f = leg.media?.format ?: return
+        Captions.clear()
+        audio.translator = CallTranslator(core.context, core.prefs, f.sampleRate, f.frameSamples)
+        if (core.prefs.captionBubble) bubble = CaptionBubble(core.context).also { it.show() }
+    }
+    private var bubble: CaptionBubble? = null
 
     /** Starts recording both sides to Recordings/SimBridge (Record button or auto-record). */
     @Synchronized fun startRecording() {
@@ -116,6 +127,7 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
                         android.os.Handler(android.os.Looper.getMainLooper()).post {
                             LinkService.onCallActive()
                             leg.media?.let(audio::start)
+                            startTranslator()
                             ActiveCall.current = this@GatewayConnection
                             core.notifier.inCall(label, recording = false)
                             if (core.prefs.autoRecord) startRecording()
@@ -169,7 +181,9 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
         stopRecording()
         if (ActiveCall.current === this) { ActiveCall.current = null; core.notifier.cancelInCall() }
         stopRingback()
-        Thread { audio.stop() }.start()
+        bubble?.let { b -> android.os.Handler(android.os.Looper.getMainLooper()).post { b.hide() } }
+        bubble = null
+        Thread { audio.stop(); audio.translator?.close(); audio.translator = null }.start()
         core.legs.remove(leg.id)
         setDisconnected(dc)
         destroy()

@@ -105,6 +105,80 @@ class Prefs(context: Context) {
         get() = p.getBoolean("block_hidden", false)
         set(v) = p.edit().putBoolean("block_hidden", v).apply()
 
+    /** Calls: translation mode each call starts in (can be changed during the call). */
+    var translateMode: TranslateMode
+        get() = runCatching { TranslateMode.valueOf(p.getString("translate_mode", null) ?: "OFF") }.getOrDefault(TranslateMode.OFF)
+        set(v) = p.edit().putString("translate_mode", v.name).apply()
+
+    /** Translation: never send call audio to the cloud (less accurate). */
+    var translateOnDevice: Boolean
+        get() = p.getBoolean("translate_on_device", false)
+        set(v) = p.edit().putBoolean("translate_on_device", v).apply()
+
+    /** Translation: Groq key (speech recognition and the Groq engines), encrypted like the pairing secrets. */
+    var groqKey: String
+        get() = sealed("groq_sealed")
+        set(v) = sealed("groq_sealed", v)
+
+    var cerebrasKey: String
+        get() = sealed("cerebras_sealed")
+        set(v) = sealed("cerebras_sealed", v)
+
+    var geminiKey: String
+        get() = sealed("gemini_sealed")
+        set(v) = sealed("gemini_sealed", v)
+
+    fun keyFor(e: Engine): String = when (e) {
+        Engine.GROQ_120B, Engine.GROQ_20B -> groqKey
+        Engine.CEREBRAS -> cerebrasKey
+        Engine.GEMINI -> geminiKey
+        Engine.ON_DEVICE -> ""
+    }
+
+    /** Translation: engine for text translation. */
+    var translateEngine: Engine
+        get() = runCatching { Engine.valueOf(p.getString("translate_engine", null) ?: "GROQ_120B") }.getOrDefault(Engine.GROQ_120B)
+        set(v) = p.edit().putString("translate_engine", v.name).apply()
+
+    /** Translation: model override for the engine (blank = the engine's default). */
+    var translateModel: String
+        get() = p.getString("translate_model", null)?.takeIf { it.isNotBlank() && it != "openai/gpt-oss-120b" } ?: ""
+        set(v) = p.edit().putString("translate_model", v.trim()).apply()
+
+    /** Translation: the caller's language and mine (ISO codes from [Langs]). */
+    var callerLang: String
+        get() = p.getString("caller_lang", null) ?: "tr"
+        set(v) = p.edit().putString("caller_lang", v).apply()
+
+    var myLang: String
+        get() = p.getString("my_lang", null) ?: "en"
+        set(v) = p.edit().putString("my_lang", v).apply()
+
+    /** Translation: quiet time that ends a sentence. Shorter is faster but may split sentences. */
+    var pauseMs: Int
+        get() = p.getInt("pause_ms", 600)
+        set(v) = p.edit().putInt("pause_ms", v).apply()
+
+    /** Translation: also read the caller's translated words to me in the earpiece. */
+    var speakToMe: Boolean
+        get() = p.getBoolean("speak_to_me", false)
+        set(v) = p.edit().putBoolean("speak_to_me", v).apply()
+
+    /** Translation: floating translate button over the call screen. */
+    var captionBubble: Boolean
+        get() = p.getBoolean("caption_bubble", true)
+        set(v) = p.edit().putBoolean("caption_bubble", v).apply()
+
+    /** Translation: larger caption text. */
+    var captionLarge: Boolean
+        get() = p.getBoolean("caption_large", false)
+        set(v) = p.edit().putBoolean("caption_large", v).apply()
+
+    private fun sealed(k: String): String = p.getString(k, null)?.let(::unseal) ?: ""
+    private fun sealed(k: String, v: String) {
+        if (v.isBlank()) p.edit().remove(k).apply() else p.edit().putString(k, seal(v.trim())).apply()
+    }
+
     fun isBlocked(number: String?): Boolean {
         return blocked.any { io.github.sparkcyf.voicesipagent.voice.PhoneNumbers.same(number, it) }
     }

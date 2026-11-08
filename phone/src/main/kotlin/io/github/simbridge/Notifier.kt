@@ -148,13 +148,17 @@ class Notifier(private val context: Context, private val core: LinkCore) {
         val action = if (recording) RecordReceiver.STOP else RecordReceiver.START
         val pi = PendingIntent.getBroadcast(context, 11, Intent(context, RecordReceiver::class.java).setAction(action),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val captions = PendingIntent.getActivity(context, 12, Intent(context, CaptionActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
         val n = Notification.Builder(context, CH_CALL)
             .setSmallIcon(R.drawable.ic_link)
             .setContentTitle(if (recording) context.getString(R.string.n_recording, name) else context.getString(R.string.n_call_with, name))
             .setContentText(if (recording) context.getString(R.string.n_rec_saved_end) else context.getString(R.string.n_tap_record))
             .setOngoing(true).setUsesChronometer(true).setShowWhen(true)
             .setCategory(Notification.CATEGORY_CALL)
+            .setContentIntent(captions)
             .addAction(Notification.Action.Builder(null, if (recording) context.getString(R.string.stop_recording) else context.getString(R.string.record), pi).build())
+            .addAction(Notification.Action.Builder(null, context.getString(R.string.translate), captions).build())
             .build()
         runCatching { nm.notify(ID_CALL, n) }
     }

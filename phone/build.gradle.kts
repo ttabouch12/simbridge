@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.simbridge"
         minSdk = 34
         targetSdk = 36
-        versionCode = 220
-        versionName = "2.1.0"
+        versionCode = 230
+        versionName = "2.2.0"
     }
     // Same signing source as the gateway app: a git-ignored signing.properties in the project root.
     val localSigning = Properties().apply {
@@ -56,6 +56,8 @@ android {
         create("full") {
             dimension = "store"
             buildConfigField("boolean", "UPDATE_CHECK_DEFAULT", "true")
+            // ML Kit translation ships a ~16 MB native lib per ABI; Android 14+ phones are arm64.
+            ndk { abiFilters += "arm64-v8a" }
         }
         create("foss") {
             dimension = "store"
@@ -79,5 +81,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     // QR scanning for pairing via Google Play services (no camera permission needed).
     "fullImplementation"("com.google.android.gms:play-services-code-scanner:16.1.0")
+    // On-device Turkish/English translation for call captions (offline fallback).
+    "fullImplementation"("com.google.mlkit:translate:17.0.3")
 }
 

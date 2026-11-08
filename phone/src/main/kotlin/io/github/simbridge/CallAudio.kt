@@ -22,6 +22,8 @@ class CallAudio {
     @Volatile var muted = false
     /** Set while the call is being recorded; gets both sides of every frame. */
     @Volatile var recorder: CallRecorder? = null
+    /** Set during the call; hears the caller and may replace my voice with translated speech. */
+    @Volatile var translator: CallTranslator? = null
     @Volatile private var running = false
     private var thread: Thread? = null
 
@@ -79,10 +81,13 @@ class CallAudio {
                     got += r
                 }
                 if (got < n) { Thread.sleep(5); continue }
-                val up = if (muted) zero else buf
+                val tr = translator
+                val up = if (muted) zero else tr?.uplink(buf) ?: buf
                 port.writeFrame(up.copyOf())
                 val down = port.readFrame()
-                track.write(down, 0, down.size)
+                val play = tr?.downlink(down) ?: down
+                track.write(play, 0, play.size)
+                tr?.heard(down)
                 recorder?.write(up, down)
                 if (++frames % 250 == 0) {  // every 5 s
                     Log.i("audio: upPeak=$upPeak downPeak=$downPeak muted=$muted")
