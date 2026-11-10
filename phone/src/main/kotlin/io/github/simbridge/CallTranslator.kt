@@ -29,6 +29,17 @@ object Captions {
     fun update(id: Long, translated: String) {
         main.post { val i = lines.indexOfFirst { it.id == id }; if (i >= 0) lines[i] = lines[i].copy(translated = translated) }
     }
+    /** The line being spoken right now (one per direction); the final caption replaces it. */
+    fun live(fromCaller: Boolean, heard: String, translated: String?) {
+        main.post {
+            val c = Caption(if (fromCaller) LIVE_CALLER else LIVE_ME, fromCaller, heard, translated)
+            val i = lines.indexOfFirst { it.id == c.id }
+            if (i >= 0) lines[i] = c else lines += c
+        }
+    }
+    fun endLive(fromCaller: Boolean) { main.post { lines.removeAll { it.id == if (fromCaller) LIVE_CALLER else LIVE_ME } } }
+    private const val LIVE_CALLER = -1L
+    private const val LIVE_ME = -2L
     fun say(s: String) { main.post { info = s } }
     fun showMode(m: TranslateMode) { main.post { mode = m } }
     fun clear() { main.post { lines.clear(); info = "" } }
@@ -44,8 +55,25 @@ class CallTranslator(private val ctx: Context, private val prefs: Prefs, private
     private val speech = Speech(ctx, prefs)
     private val callerJobs = Executors.newSingleThreadExecutor()
     private val myJobs = Executors.newSingleThreadExecutor()
-    private val theirs = Segmenter(rate, prefs.pauseMs) { pcm -> runCatching { callerJobs.execute { handle(pcm, fromCaller = true) } } }
-    private val mine = Segmenter(rate, prefs.pauseMs) { pcm -> runCatching { myJobs.execute { handle(pcm, fromCaller = false) } } }
+    // Translation and speech of a finished line run apart from recognition, so the next
+    // sentence is already being recognized while this one is translated.
+    private val callerMt = Executors.newSingleThreadExecutor()
+    private val myMt = Executors.newSingleThreadExecutor()
+    // Live captions: what is being said right now, before the sentence ends.
+    private val liveJobs = Executors.newSingleThreadExecutor()
+    private val liveBusy = java.util.concurrent.atomic.AtomicBoolean()
+    private val live = prefs.liveCaptions && speech.canLive
+    /** Sentence counters (caller, me): a live result for a sentence that already ended is dropped. */
+    private val callerGen = AtomicLong()
+    private val myGen = AtomicLong()
+    private val theirs = Segmenter(rate, prefs.pauseMs, onPartial = if (live) ({ pcm: ShortArray -> partial(pcm, fromCaller = true) }) else null) { pcm ->
+        callerGen.incrementAndGet()
+        runCatching { callerJobs.execute { handle(pcm, fromCaller = true) } }
+    }
+    private val mine = Segmenter(rate, prefs.pauseMs, onPartial = if (live) ({ pcm: ShortArray -> partial(pcm, fromCaller = false) }) else null) { pcm ->
+        myGen.incrementAndGet()
+        runCatching { myJobs.execute { handle(pcm, fromCaller = false) } }
+    }
     /** Translated speech for the caller, and for me, in call-sized frames (up to 60 s each). */
     private val toCaller = LinkedBlockingQueue<ShortArray>(3000)
     private val toMe = LinkedBlockingQueue<ShortArray>(3000)
@@ -87,24 +115,55 @@ class CallTranslator(private val ctx: Context, private val prefs: Prefs, private
     }
 
     fun close() {
-        callerJobs.shutdownNow(); myJobs.shutdownNow()
+        callerJobs.shutdownNow(); myJobs.shutdownNow(); callerMt.shutdownNow(); myMt.shutdownNow(); liveJobs.shutdownNow()
         synchronized(this) { voice?.shutdown(); voice = null }
     }
 
     @Synchronized private fun voice(): Voice = voice ?: Voice(ctx).also { voice = it }
 
+    /** Audio thread: the sentence so far. One live job at a time; extra ones are skipped. */
+    private fun partial(pcm: ShortArray, fromCaller: Boolean) {
+        if (mode == TranslateMode.OFF || !liveBusy.compareAndSet(false, true)) return
+        val gen = if (fromCaller) callerGen else myGen
+        val g = gen.get()
+        runCatching {
+            liveJobs.execute {
+                try {
+                    val from = if (fromCaller) callerLang else myLang
+                    val to = if (fromCaller) myLang else callerLang
+                    val heard = speech.transcribeLive(pcm, rate, from)?.trim().orEmpty()
+                    if (heard.isNotEmpty() && !Speech.isJunk(heard) && gen.get() == g) {
+                        Captions.live(fromCaller, heard, null)
+                        speech.translateLive(heard, from, to) { soFar -> if (gen.get() == g) Captions.live(fromCaller, heard, soFar) }
+                    }
+                } finally {
+                    liveBusy.set(false)
+                }
+            }
+        }.onFailure { liveBusy.set(false) }
+    }
+
     private fun handle(pcm: ShortArray, fromCaller: Boolean) {
         if (mode == TranslateMode.OFF) return
         val from = if (fromCaller) callerLang else myLang
-        val to = if (fromCaller) myLang else callerLang
         val t0 = System.currentTimeMillis()
         val heard = speech.transcribe(pcm, rate, from)?.trim().orEmpty()
         val t1 = System.currentTimeMillis()
+        Captions.endLive(fromCaller)
         if (heard.isEmpty() || Speech.isJunk(heard)) return
         val id = seq.incrementAndGet()
         Captions.add(Caption(id, fromCaller, heard, null))   // show what was heard right away
+        val audioMs = pcm.size * 1000L / rate
+        runCatching { (if (fromCaller) callerMt else myMt).execute { finish(id, heard, fromCaller, audioMs, t1 - t0) } }
+    }
+
+    /** Translates one recognized line (shown as it is written) and speaks it where asked. */
+    private fun finish(id: Long, heard: String, fromCaller: Boolean, audioMs: Long, sttMs: Long) {
+        val from = if (fromCaller) callerLang else myLang
+        val to = if (fromCaller) myLang else callerLang
+        val t1 = System.currentTimeMillis()
         val context = synchronized(recent) { recent.toList() }
-        val said = speech.translate(heard, from, to, context)?.trim()
+        val said = speech.translate(heard, from, to, context) { soFar -> Captions.update(id, soFar) }?.trim()
         val t2 = System.currentTimeMillis()
         Captions.update(id, said ?: "(not translated)")
         synchronized(recent) { recent.addLast(heard); while (recent.size > 3) recent.removeFirst() }
@@ -121,7 +180,7 @@ class CallTranslator(private val ctx: Context, private val prefs: Prefs, private
                 if (out != null) enqueue(out, target)
             }
         }
-        Log.i("translate: ${if (fromCaller) "caller" else "me"} audio=${pcm.size * 1000L / rate}ms stt=${t1 - t0}ms mt=${t2 - t1}ms tts=${tts}ms")
+        Log.i("translate: ${if (fromCaller) "caller" else "me"} audio=${audioMs}ms stt=${sttMs}ms mt=${t2 - t1}ms tts=${tts}ms")
     }
 
     private fun enqueue(out: ShortArray, q: LinkedBlockingQueue<ShortArray>) {
@@ -137,9 +196,11 @@ class CallTranslator(private val ctx: Context, private val prefs: Prefs, private
 
 /**
  * Cuts 20 ms frames into utterances by loudness: starts on speech (with 300 ms lead-in),
- * ends after [pauseMs] of quiet or 15 s. The noise floor adapts so line hiss doesn't count as speech.
+ * ends after [pauseMs] of quiet (350 ms once a sentence runs past 4 s) or 12 s. The noise floor adapts so line hiss doesn't count as speech.
  */
-class Segmenter(private val rate: Int, private val pauseMs: Int, private val onUtterance: (ShortArray) -> Unit) {
+class Segmenter(private val rate: Int, private val pauseMs: Int, private val onPartial: ((ShortArray) -> Unit)? = null,
+                private val onUtterance: (ShortArray) -> Unit) {
+    private var nextPartialMs = FIRST_PARTIAL_MS
     private val lead = ArrayDeque<ShortArray>()
     private val out = ArrayList<ShortArray>()
     private var speaking = false
@@ -156,15 +217,21 @@ class Segmenter(private val rate: Int, private val pauseMs: Int, private val onU
             if (!loud) floor = floor * 0.95 + level * 0.05
             lead.addLast(f)
             while (lead.size * ms > 300) lead.removeFirst()
-            if (loud) { speaking = true; loudMs = ms; quietMs = 0; out.addAll(lead); lead.clear() }
+            if (loud) { speaking = true; loudMs = ms; quietMs = 0; nextPartialMs = FIRST_PARTIAL_MS; out.addAll(lead); lead.clear() }
             return
         }
         out += f
         if (loud) { loudMs += ms; quietMs = 0 } else quietMs += ms
-        if (quietMs >= pauseMs || out.size * ms >= 15_000) {
+        val lenMs = out.size * ms
+        // A long sentence ends on a shorter pause, so its translation doesn't wait for a full stop.
+        val pause = if (lenMs > 4000) minOf(pauseMs, 350) else pauseMs
+        if (quietMs >= pause || lenMs >= 12_000) {
             if (loudMs >= 300) onUtterance(Pcm.concat(out))
             speaking = false
             out.clear()
+        } else if (onPartial != null && loud && lenMs >= nextPartialMs) {
+            nextPartialMs = lenMs + PARTIAL_EVERY_MS
+            onPartial(Pcm.concat(out))
         }
     }
 
@@ -174,7 +241,11 @@ class Segmenter(private val rate: Int, private val pauseMs: Int, private val onU
         return sqrt(s / max(1, f.size))
     }
 
-    private companion object { const val MIN_LEVEL = 300.0 }
+    private companion object {
+        const val MIN_LEVEL = 300.0
+        const val FIRST_PARTIAL_MS = 2000
+        const val PARTIAL_EVERY_MS = 3000
+    }
 }
 
 /** Small PCM16 helpers: join, resample, WAV in and out. */

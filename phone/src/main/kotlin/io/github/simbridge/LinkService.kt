@@ -56,6 +56,9 @@ class LinkService : Service() {
             val nm = getSystemService(NotificationManager::class.java)
             core.status.collect { nm.notify(Notifier.ID_STATUS, core.notifier.statusNotification(it)) }
         }
+        if (schedJob == null) schedJob = scope.launch {
+            while (true) { runCatching { core.sendDueScheduled() }; kotlinx.coroutines.delay(20_000) }
+        }
         if (widgetJob == null) widgetJob = scope.launch {
             kotlinx.coroutines.flow.combine(core.status, core.control.status) { _, _ -> }.collect { LinkWidget.update(this@LinkService) }
         }
@@ -81,6 +84,7 @@ class LinkService : Service() {
 
     private var placesJob: kotlinx.coroutines.Job? = null
     private var widgetJob: kotlinx.coroutines.Job? = null
+    private var schedJob: kotlinx.coroutines.Job? = null
 
     override fun onDestroy() {
         if (instance === this) instance = null

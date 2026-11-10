@@ -1,5 +1,34 @@
 # Changelog
 
+## SimBridge 2.4.0
+
+Update both apps. Pairing is kept.
+
+### Main phone
+- **Messages work like Google Messages / Gmail:**
+  - **Swipe** a conversation: read / unread, archive, delete or pin. Choose what each direction does
+    in Settings > Messages. Delete shows **Undo**.
+  - **Select several** (long-press, then tap): pin, archive, read / unread, delete, block, select all.
+  - **Pinned** conversations stay on top; **Archived** ones leave the list until a new text arrives.
+  - **Filters:** All, Unread, Archived, Starred. **Search** also looks inside messages; a
+    conversation has its own search too.
+  - **Links, e-mail addresses and phone numbers** in texts open when tapped; one-time codes copy.
+  - **Long-press a message:** copy, star, forward, details, delete (several at once).
+  - **Send later:** hold Send and pick a time. Waiting texts show above the keyboard and can be
+    cancelled; they go out when the SIM phone is reachable.
+- **Faster call translation:**
+  - Words appear **while they are spoken** (cloud speech), and the translation is written out as it
+    arrives instead of all at once.
+  - The next sentence is recognized while the previous one is translated.
+  - Long sentences end on a shorter pause; the default pause is now "Fast".
+- **Battery time left** for the SIM phone on the dashboard, from its real drain (or time to full).
+
+### SIM phone (gateway)
+- **Hotspot comes on by itself when Wi-Fi is lost** (with home/work Wi-Fi set up and its switch on),
+  also after a restart away from home, so the main phone can always reach it.
+- Time-left estimate from the measured drain of the current discharge.
+- The 20 % low-battery alert was sent twice; now once at 20 % and once at 10 %.
+
 ## SimBridge 2.3.0
 
 Update both apps. Pairing is kept.

@@ -252,6 +252,12 @@ fun SettingsScreen(core: LinkCore, onSimPhone: () -> Unit = {}, onBlocked: () ->
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+                Card(Icons.Filled.Sms, stringResource(R.string.set_swipe), stringResource(R.string.set_swipe_text), ok = true) {
+                    Column {
+                        SwipePicker(stringResource(R.string.set_swipe_right), core.prefs.swipeRight) { core.prefs.swipeRight = it }
+                        SwipePicker(stringResource(R.string.set_swipe_left), core.prefs.swipeLeft) { core.prefs.swipeLeft = it }
+                    }
+                }
                 var otp by remember { mutableStateOf(core.prefs.otpCopy) }
                 Card(Icons.Filled.Sms, stringResource(R.string.set_otp), stringResource(R.string.set_otp_text), ok = true) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -425,6 +431,8 @@ private fun TranslationCard(core: LinkCore) {
         if (bubble && !overlayOk) TextButton({
             runCatching { ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName))) }
         }) { Text(stringResource(R.string.set_tr_bubble_allow)) }
+        var liveCap by remember { mutableStateOf(prefs.liveCaptions) }
+        SwitchRow(stringResource(R.string.set_tr_live), liveCap) { liveCap = it; prefs.liveCaptions = it }
         SwitchRow(stringResource(R.string.set_tr_speak_me), speakToMe) { speakToMe = it; prefs.speakToMe = it }
         SwitchRow(stringResource(R.string.set_tr_large), large) { large = it; prefs.captionLarge = it }
         SwitchRow(stringResource(R.string.set_translate_offline), onDevice) {
@@ -469,3 +477,23 @@ private fun LangPicker(label: String, code: String, modifier: Modifier, pick: (S
         }
     }
 }
+
+/** One swipe direction on a conversation and what it does. */
+@Composable
+private fun SwipePicker(label: String, value: String, set: (String) -> Unit) {
+    var current by remember { mutableStateOf(value) }
+    var open by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Box {
+            TextButton({ open = true }) { Text(stringResource(ConvAction.label(current))) }
+            androidx.compose.material3.DropdownMenu(open, { open = false }) {
+                ConvAction.all.forEach { a ->
+                    androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(ConvAction.label(a))) },
+                        onClick = { current = a; set(a); open = false })
+                }
+            }
+        }
+    }
+}
+

@@ -21,6 +21,7 @@ data class Msg(
     val sim: Int = 0,
     /** MMS attachments as JSON (see [Attachments]); empty for plain texts. */
     val att: String = "",
+    val starred: Boolean = false,
 ) {
     companion object {
         const val RECEIVED = 0
@@ -31,10 +32,14 @@ data class Msg(
     }
 }
 
-data class Conversation(val key: String, val address: String, val last: Msg, val unread: Int)
+data class Conversation(val key: String, val address: String, val last: Msg, val unread: Int,
+                        val pinned: Boolean = false, val archived: Boolean = false)
+
+/** A text waiting for its send time. */
+data class Scheduled(val id: Long, val address: String, val body: String, val at: Long, val sim: Int)
 
 /** Texts relayed by the SIM phone, kept on this phone. A tiny SQLite table; one row per message. */
-class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", null, 3) {
+class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", null, 4) {
     private val _version = MutableStateFlow(0L)
     /** Bumps on every change; UI re-queries when it moves. */
     val version: StateFlow<Long> = _version
@@ -42,8 +47,17 @@ class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE m (id INTEGER PRIMARY KEY AUTOINCREMENT, k TEXT NOT NULL, addr TEXT NOT NULL, " +
             "body TEXT NOT NULL, ts INTEGER NOT NULL, out INTEGER NOT NULL, status INTEGER NOT NULL, rd INTEGER NOT NULL, " +
-            "sys INTEGER NOT NULL DEFAULT 0, sim INTEGER NOT NULL DEFAULT 0, att TEXT NOT NULL DEFAULT '')")
+            "sys INTEGER NOT NULL DEFAULT 0, sim INTEGER NOT NULL DEFAULT 0, att TEXT NOT NULL DEFAULT '', " +
+            "star INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE INDEX m_k ON m(k, ts)")
+        extraTables(db)
+    }
+
+    /** Per-conversation flags (pinned, archived) and texts scheduled for later. */
+    private fun extraTables(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS c (k TEXT PRIMARY KEY, pinned INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS sched (id INTEGER PRIMARY KEY AUTOINCREMENT, addr TEXT NOT NULL, body TEXT NOT NULL, " +
+            "at INTEGER NOT NULL, sim INTEGER NOT NULL DEFAULT 0)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -51,6 +65,10 @@ class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", 
         if (oldVersion < 3) {
             db.execSQL("ALTER TABLE m ADD COLUMN sim INTEGER NOT NULL DEFAULT 0")
             db.execSQL("ALTER TABLE m ADD COLUMN att TEXT NOT NULL DEFAULT ''")
+        }
+        if (oldVersion < 4) {
+            db.execSQL("ALTER TABLE m ADD COLUMN star INTEGER NOT NULL DEFAULT 0")
+            extraTables(db)
         }
     }
 
@@ -80,6 +98,8 @@ class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", 
             put("out", if (outgoing) 1 else 0); put("status", status); put("rd", if (read) 1 else 0)
             put("sim", sim); put("att", att)
         })
+        // A new incoming text brings an archived conversation back to the list.
+        if (!outgoing) writableDatabase.execSQL("UPDATE c SET archived=0 WHERE k=?", arrayOf(keyOf(address)))
         changed()
         return id
     }
@@ -126,11 +146,79 @@ class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", 
             while (it.moveToNext()) sys += it.getLong(0)
         }
         writableDatabase.delete("m", "k=?", arrayOf(key))
+        writableDatabase.delete("c", "k=?", arrayOf(key))
         changed()
         return sys
     }
 
+    // ------------------------------------------------------------ flags, single messages, search
+
+    private fun flag(keys: Collection<String>, column: String, on: Boolean) {
+        val db = writableDatabase
+        keys.forEach { k ->
+            db.execSQL("INSERT OR IGNORE INTO c (k) VALUES (?)", arrayOf(k))
+            db.execSQL("UPDATE c SET $column=? WHERE k=?", arrayOf<Any>(if (on) 1 else 0, k))
+        }
+        changed()
+    }
+
+    fun setPinned(keys: Collection<String>, on: Boolean) = flag(keys, "pinned", on)
+    fun setArchived(keys: Collection<String>, on: Boolean) = flag(keys, "archived", on)
+
+    /** Marks a conversation unread again (its latest incoming message). */
+    fun markUnread(key: String) {
+        writableDatabase.execSQL("UPDATE m SET rd=0 WHERE id=(SELECT MAX(id) FROM m WHERE k=? AND out=0)", arrayOf(key))
+        changed()
+    }
+
+    fun setStarred(ids: Collection<Long>, on: Boolean) {
+        ids.forEach { writableDatabase.execSQL("UPDATE m SET star=? WHERE id=?", arrayOf<Any>(if (on) 1 else 0, it)) }
+        changed()
+    }
+
+    /** Deletes single messages; returns their rows (for the system SMS copies and attachment files). */
+    fun deleteMessages(ids: Collection<Long>): List<Msg> {
+        val gone = ids.mapNotNull { get(it) }
+        ids.forEach { writableDatabase.delete("m", "id=?", arrayOf(it.toString())) }
+        changed()
+        return gone
+    }
+
+    /** Messages containing [query] (newest first), or the starred ones when [starred]. */
+    fun search(query: String, starred: Boolean = false, limit: Int = 60): List<Msg> {
+        val like = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        val where = if (starred) "star=1 AND body LIKE ? ESCAPE '\\'" else "body LIKE ? ESCAPE '\\'"
+        return readableDatabase.rawQuery("SELECT * FROM m WHERE $where ORDER BY ts DESC LIMIT $limit", arrayOf(like)).use { c ->
+            ArrayList<Msg>().apply { while (c.moveToNext()) add(c.msg()) }
+        }
+    }
+
+    // ------------------------------------------------------------ scheduled texts
+
+    fun schedule(address: String, body: String, at: Long, sim: Int): Long {
+        val id = writableDatabase.insert("sched", null, ContentValues().apply {
+            put("addr", address); put("body", body); put("at", at); put("sim", sim)
+        })
+        changed()
+        return id
+    }
+
+    /** Scheduled texts, soonest first; only those due by [dueBy] when given. */
+    fun scheduled(dueBy: Long = Long.MAX_VALUE): List<Scheduled> =
+        readableDatabase.rawQuery("SELECT id, addr, body, at, sim FROM sched WHERE at<=? ORDER BY at", arrayOf(dueBy.toString())).use { c ->
+            ArrayList<Scheduled>().apply { while (c.moveToNext()) add(Scheduled(c.getLong(0), c.getString(1), c.getString(2), c.getLong(3), c.getInt(4))) }
+        }
+
+    fun unschedule(id: Long) {
+        writableDatabase.delete("sched", "id=?", arrayOf(id.toString()))
+        changed()
+    }
+
     fun conversations(): List<Conversation> {
+        val flags = HashMap<String, Pair<Boolean, Boolean>>()
+        readableDatabase.rawQuery("SELECT k, pinned, archived FROM c WHERE pinned=1 OR archived=1", null).use {
+            while (it.moveToNext()) flags[it.getString(0)] = (it.getInt(1) == 1) to (it.getInt(2) == 1)
+        }
         val unread = HashMap<String, Int>()
         readableDatabase.rawQuery("SELECT k, COUNT(*) FROM m WHERE rd=0 GROUP BY k", null).use {
             while (it.moveToNext()) unread[it.getString(0)] = it.getInt(1)
@@ -140,10 +228,12 @@ class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", 
             "ON m.id = t.mid ORDER BY m.ts DESC", null).use {
             while (it.moveToNext()) {
                 val msg = it.msg()
-                out += Conversation(msg.key, msg.address, msg, unread[msg.key] ?: 0)
+                val f = flags[msg.key]
+                out += Conversation(msg.key, msg.address, msg, unread[msg.key] ?: 0, f?.first == true, f?.second == true)
             }
         }
-        return out
+        // Pinned conversations first; the newest-first order is kept inside each group.
+        return out.sortedByDescending { it.pinned }
     }
 
     fun thread(key: String): List<Msg> {
@@ -168,6 +258,7 @@ class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", 
         read = getInt(getColumnIndexOrThrow("rd")) == 1,
         sim = getInt(getColumnIndexOrThrow("sim")),
         att = getString(getColumnIndexOrThrow("att")) ?: "",
+        starred = getInt(getColumnIndexOrThrow("star")) == 1,
     )
 
     companion object {

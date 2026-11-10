@@ -196,7 +196,12 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
     @SuppressLint("MissingPermission")
     fun status(): JSONObject {
         val o = JSONObject().put("op", "status").put("at", System.currentTimeMillis())
-        BatteryInfo.read(app)?.let { o.put("battery", it.percent).put("charging", it.charging) }
+        BatteryInfo.read(app)?.let { b ->
+            o.put("battery", b.percent).put("charging", b.charging)
+            if (b.charging) runCatching { app.getSystemService(android.os.BatteryManager::class.java).computeChargeTimeRemaining() }
+                .getOrNull()?.takeIf { it > 0 }?.let { o.put("chargeMin", (it / 60_000).toInt()) }
+            else BatteryEstimate.minutesLeft(android.os.SystemClock.elapsedRealtime())?.let { o.put("batteryMin", it) }
+        }
         o.put("powerSaver", rt.companionPower.value).put("quiet", rt.quietFlags.value)
         o.put("uptimeMin", SystemClock.elapsedRealtime() / 60_000)
         o.put("version", runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull() ?: "")
@@ -421,22 +426,37 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
 
     private var wifiWatch: android.net.ConnectivityManager.NetworkCallback? = null
 
+    /** Called once when the gateway starts. */
+    fun start() {
+        watchWifiLoss()
+        // After a restart away from every saved place: make sure the main phone can reach us.
+        main.postDelayed({ rt.worker { hotspotIfNoWifi("started without Wi-Fi") } }, 45_000)
+    }
+
+    /** "Hotspot when Wi-Fi is lost" is on (the Places switch) and at least one place is saved. */
+    private fun autoHotspot(): Boolean = runCatching {
+        val p = JSONObject(prefs.getString("places", "{}")!!)
+        p.optBoolean("auto", true) && (p.optJSONArray("list")?.length() ?: 0) > 0
+    }.getOrDefault(false)
+
+    private fun hotspotIfNoWifi(why: String) {
+        if (!autoHotspot() || hotspotOn()) return
+        val ssid = privilegedRaw("wifi-ssid", "")
+        if (ssid.startsWith("error") || ssid.isNotEmpty()) return
+        prefs.edit().remove("at_place").apply()
+        AppLog.i("control: $why, hotspot on")
+        privileged("hotspot", "on")
+    }
+
     private fun watchWifiLoss() {
         if (wifiWatch != null) return
         val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
         val req = android.net.NetworkRequest.Builder().addTransportType(android.net.NetworkCapabilities.TRANSPORT_WIFI).build()
         wifiWatch = object : android.net.ConnectivityManager.NetworkCallback() {
             override fun onLost(network: android.net.Network) {
-                val auto = runCatching { JSONObject(prefs.getString("places", "{}")!!).optBoolean("auto", true) }.getOrDefault(true)
-                if (prefs.getString("at_place", "").isNullOrEmpty() || !auto) return
+                if (!autoHotspot()) return
                 // Brief drops happen; only act if Wi-Fi stays gone.
-                main.postDelayed({ rt.worker {
-                    if (privilegedRaw("wifi-ssid", "").isEmpty()) {
-                        prefs.edit().remove("at_place").apply()
-                        AppLog.i("control: left place, hotspot back on")
-                        privileged("hotspot", "on")
-                    }
-                } }, 20_000)
+                main.postDelayed({ rt.worker { hotspotIfNoWifi("Wi-Fi lost") } }, 20_000)
             }
         }
         runCatching { cm.registerNetworkCallback(req, wifiWatch!!) }

@@ -1,5 +1,22 @@
 package io.github.simbridge.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.material.icons.automirrored.filled.Forward
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
 import io.github.simbridge.R
 import androidx.compose.ui.res.stringResource
 import android.Manifest
@@ -43,7 +60,6 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -89,6 +105,11 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
     var msgs by remember { mutableStateOf(emptyList<Msg>()) }
     var draft by remember(key) { mutableStateOf(initialDraft) }
     var menu by remember { mutableStateOf(false) }
+    // Long-press a bubble to select it; then tap others (copy, star, forward, details, delete).
+    var picked by remember(key) { mutableStateOf(emptySet<Long>()) }
+    var details by remember { mutableStateOf<Msg?>(null) }
+    var find by remember(key) { mutableStateOf<String?>(null) }
+    var scheduleAsk by remember { mutableStateOf(false) }
     var pending by remember(key) { mutableStateOf(emptyList<io.github.simbridge.Attachment>()) }
     val group = io.github.simbridge.Group.isGroup(address)
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -111,10 +132,33 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
         if (msgs.any { !it.read }) withContext(Dispatchers.IO) { core.markRead(key) }
         core.notifier.cancel(key)
     }
-    val items = remember(msgs) { buildItems(msgs) }
+    val items = remember(msgs, find) { buildItems(find?.takeIf { it.isNotBlank() }?.let { q -> msgs.filter { it.body.contains(q, true) } } ?: msgs) }
+    val scheduled = remember(version, key) { core.store.scheduled().filter { io.github.simbridge.MessageStore.keyOf(it.address) == key } }
+    androidx.activity.compose.BackHandler(enabled = picked.isNotEmpty() || find != null) { picked = emptySet(); find = null }
 
     Scaffold(
         topBar = {
+            if (picked.isNotEmpty()) {
+                val sel = msgs.filter { it.id in picked }
+                TopAppBar(
+                    navigationIcon = { IconButton({ picked = emptySet() }) { Icon(Icons.Filled.Close, stringResource(R.string.cancel)) } },
+                    title = { Text(picked.size.toString()) },
+                    actions = {
+                        IconButton({ copy(ctx, sel.joinToString("\n") { it.body }); picked = emptySet() }) {
+                            Icon(Icons.Filled.ContentCopy, stringResource(R.string.copy)) }
+                        IconButton({ core.store.setStarred(picked, !sel.all { it.starred }); picked = emptySet() }) {
+                            Icon(if (sel.all { it.starred }) Icons.Filled.Star else Icons.Outlined.StarBorder, stringResource(R.string.act_star)) }
+                        IconButton({
+                            runCatching { ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
+                                .putExtra(Intent.EXTRA_TEXT, sel.joinToString("\n") { it.body }), null)) }
+                            picked = emptySet()
+                        }) { Icon(Icons.AutoMirrored.Filled.Forward, stringResource(R.string.act_forward)) }
+                        if (sel.size == 1) IconButton({ details = sel.first(); picked = emptySet() }) {
+                            Icon(Icons.Outlined.Info, stringResource(R.string.act_details)) }
+                        IconButton({ core.deleteMessages(picked); picked = emptySet() }) { Icon(Icons.Outlined.Delete, stringResource(R.string.delete)) }
+                    },
+                )
+            } else Column {
             TopAppBar(
                 navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
                 title = {
@@ -132,6 +176,7 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
                     if (!gateway && !group && address.any { it.isDigit() }) IconButton({ call(ctx, address) }) { Icon(Icons.Filled.Call, stringResource(R.string.call)) }
                     IconButton({ menu = true }) { Icon(Icons.Filled.MoreVert, stringResource(R.string.more)) }
                     DropdownMenu(menu, { menu = false }) {
+                        DropdownMenuItem(text = { Text(stringResource(R.string.search_chat)) }, onClick = { menu = false; find = "" })
                         DropdownMenuItem(text = { Text(stringResource(R.string.copy_number)) }, onClick = { menu = false; copy(ctx, address) })
                         DropdownMenuItem(text = { Text(stringResource(R.string.delete_conv)) }, onClick = {
                             menu = false; core.deleteConversation(key); onBack()
@@ -140,9 +185,26 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
             )
+            find?.let { q ->
+                TextField(q, { find = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text(stringResource(R.string.search_chat)) },
+                    trailingIcon = { IconButton({ find = null }) { Icon(Icons.Filled.Close, stringResource(R.string.clear)) } })
+            }
+            }
         },
         bottomBar = {
-            if (!gateway) Composer(draft, { draft = it }, connected = status.state == LinkState.CONNECTED,
+            if (!gateway) Column {
+            scheduled.forEach { sc ->
+                Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(start = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Schedule, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text(scheduleTime(sc.at) + " · " + sc.body, Modifier.weight(1f).padding(horizontal = 8.dp),
+                        style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    IconButton({ core.store.unschedule(sc.id) }) { Icon(Icons.Filled.Close, stringResource(R.string.cancel)) }
+                }
+            }
+            Composer(draft, { draft = it }, connected = status.state == LinkState.CONNECTED,
+                onSchedule = { if (draft.isNotBlank() && pending.isEmpty()) scheduleAsk = true },
                 pending = pending, onAttach = {
                     picker.launch(androidx.activity.result.PickVisualMediaRequest(
                         androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -152,6 +214,7 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
                     pending.isNotEmpty() -> { core.sendMms(address, text, pending); pending = emptyList(); draft = "" }
                     text.isNotEmpty() -> { core.sendText(address, text); draft = "" }
                 }
+            }
             }
         },
     ) { pad ->
@@ -167,10 +230,98 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
                         Text(dayHeader(item.time), style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    is Item.Bubble -> Bubble(item, core, group,
-                        onRetry = { core.retry(item.msg) },
-                        onCopy = { copy(ctx, item.msg.body) })
+                    is Item.Bubble -> Bubble(item, core, group, selected = item.msg.id in picked,
+                        onClick = {
+                            val id = item.msg.id
+                            when {
+                                picked.isNotEmpty() -> picked = if (id in picked) picked - id else picked + id
+                                item.msg.status == Msg.FAILED -> core.retry(item.msg)
+                            }
+                        },
+                        onLongClick = { val id = item.msg.id; picked = if (id in picked) picked - id else picked + id },
+                        onCopy = { copy(ctx, it) })
                 }
+            }
+        }
+    }
+    details?.let { m -> DetailsDialog(m) { details = null } }
+    if (scheduleAsk) ScheduleDialog(onPick = { t ->
+        core.store.schedule(address, draft.trim(), t, core.simFor(address)); draft = ""; scheduleAsk = false
+    }, onDismiss = { scheduleAsk = false })
+}
+
+/** "Tue 14:30" for today/this week, else with the date. */
+private fun scheduleTime(t: Long): String =
+    java.text.SimpleDateFormat(if (sameDay(t, System.currentTimeMillis())) "HH:mm" else "EEE d MMM, HH:mm", java.util.Locale.getDefault()).format(java.util.Date(t))
+
+@Composable
+private fun DetailsDialog(m: Msg, onDismiss: () -> Unit) {
+    val whenText = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(m.time))
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.act_details)) },
+        text = {
+            Text(listOfNotNull(
+                stringResource(if (m.att.isNotBlank()) R.string.details_mms else R.string.details_sms),
+                (if (m.outgoing) stringResource(R.string.details_to) else stringResource(R.string.details_from)) + " " + m.address,
+                whenText,
+                if (m.sim > 0) "SIM ${m.sim}" else null,
+                if (m.outgoing) stringResource(when (m.status) {
+                    Msg.DELIVERED -> R.string.details_delivered; Msg.FAILED -> R.string.details_failed
+                    Msg.SENDING -> R.string.sending; else -> R.string.details_sent
+                }) else null,
+            ).joinToString("\n"))
+        },
+        confirmButton = { TextButton(onDismiss) { Text(stringResource(R.string.ok)) } },
+    )
+}
+
+/** Pick when a text goes out: a few usual times, or any date and time. */
+@Composable
+private fun ScheduleDialog(onPick: (Long) -> Unit, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    val now = System.currentTimeMillis()
+    fun at(dayOffset: Int, hour: Int) = java.util.Calendar.getInstance().apply {
+        add(java.util.Calendar.DAY_OF_YEAR, dayOffset)
+        set(java.util.Calendar.HOUR_OF_DAY, hour); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
+    }.timeInMillis
+    val choices = listOf(now + 3_600_000L, at(0, 18), at(1, 8), at(1, 13)).filter { it > now + 60_000 }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Filled.Schedule, null) },
+        title = { Text(stringResource(R.string.schedule_title)) },
+        text = {
+            Column {
+                choices.forEach { t -> TextButton({ onPick(t) }) { Text(scheduleTime(t)) } }
+                TextButton({
+                    val c = java.util.Calendar.getInstance()
+                    android.app.DatePickerDialog(ctx, { _, y, mo, d ->
+                        android.app.TimePickerDialog(ctx, { _, h, mi ->
+                            c.set(y, mo, d, h, mi, 0)
+                            if (c.timeInMillis > System.currentTimeMillis()) onPick(c.timeInMillis)
+                            else Toast.makeText(ctx, ctx.getString(R.string.schedule_past), Toast.LENGTH_SHORT).show()
+                        }, c.get(java.util.Calendar.HOUR_OF_DAY), c.get(java.util.Calendar.MINUTE), true).show()
+                    }, c.get(java.util.Calendar.YEAR), c.get(java.util.Calendar.MONTH), c.get(java.util.Calendar.DAY_OF_MONTH)).show()
+                }) { Text(stringResource(R.string.schedule_pick)) }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
+/** The message text with links, e-mail addresses and phone numbers that open, and codes that copy. */
+@Composable
+private fun linked(text: String, onCopy: (String) -> Unit): AnnotatedString {
+    val copyNow by rememberUpdatedState(onCopy)
+    return remember(text) {
+        buildAnnotatedString {
+            append(text)
+            val styles = TextLinkStyles(SpanStyle(textDecoration = TextDecoration.Underline))
+            io.github.simbridge.Linkify.spans(text).forEach { sp ->
+                if (sp.kind == io.github.simbridge.Linkify.Kind.CODE)
+                    addLink(LinkAnnotation.Clickable(tag = "code", styles = styles, linkInteractionListener = { copyNow(sp.target) }), sp.start, sp.end)
+                else addLink(LinkAnnotation.Url(sp.target, styles), sp.start, sp.end)
             }
         }
     }
@@ -178,7 +329,8 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Bubble(item: Item.Bubble, core: LinkCore, group: Boolean, onRetry: () -> Unit, onCopy: () -> Unit) {
+private fun Bubble(item: Item.Bubble, core: LinkCore, group: Boolean, selected: Boolean,
+                   onClick: () -> Unit, onLongClick: () -> Unit, onCopy: (String) -> Unit) {
     val m = item.msg
     val ctx = LocalContext.current
     val mms = remember(m.att) { io.github.simbridge.MmsInfo.parse(m.att) }
@@ -197,7 +349,8 @@ private fun Bubble(item: Item.Bubble, core: LinkCore, group: Boolean, onRetry: (
         else -> MaterialTheme.colorScheme.onSurface
     }
     Column(
-        Modifier.fillMaxWidth().padding(top = if (item.joinAbove) 2.dp else 8.dp),
+        Modifier.fillMaxWidth().background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent)
+            .padding(top = if (item.joinAbove) 2.dp else 8.dp),
         horizontalAlignment = if (m.outgoing) Alignment.End else Alignment.Start,
     ) {
         if (group && !m.outgoing && !item.joinAbove) mms?.from?.let { f ->
@@ -210,14 +363,13 @@ private fun Bubble(item: Item.Bubble, core: LinkCore, group: Boolean, onRetry: (
                 tint = MaterialTheme.colorScheme.error)
             Surface(
                 shape = shape, color = bg, contentColor = fg,
-                modifier = Modifier.widthIn(max = 300.dp).combinedClickable(
-                    onClick = { if (failed) onRetry() }, onLongClick = onCopy),
+                modifier = Modifier.widthIn(max = 300.dp).combinedClickable(onClick = onClick, onLongClick = onLongClick),
             ) {
-                Text(m.body, Modifier.padding(horizontal = 16.dp, vertical = 10.dp), style = MaterialTheme.typography.bodyLarge)
+                Text(linked(m.body, onCopy), Modifier.padding(horizontal = 16.dp, vertical = 10.dp), style = MaterialTheme.typography.bodyLarge)
             }
         }
-        if (item.showStatus || failed) {
-            val label = when {
+        if (item.showStatus || failed || m.starred) {
+            val label = (if (m.starred) "★ " else "") + when {
                 failed -> stringResource(R.string.not_sent_retry)
                 m.status == Msg.SENDING -> stringResource(R.string.sending)
                 m.status == Msg.DELIVERED -> "Delivered · ${clockTime(m.time)}"
@@ -230,8 +382,9 @@ private fun Bubble(item: Item.Bubble, core: LinkCore, group: Boolean, onRetry: (
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Composer(text: String, onText: (String) -> Unit, connected: Boolean,
+private fun Composer(text: String, onText: (String) -> Unit, connected: Boolean, onSchedule: () -> Unit,
                      pending: List<io.github.simbridge.Attachment>, onAttach: () -> Unit,
                      onRemove: (io.github.simbridge.Attachment) -> Unit, onSend: () -> Unit) {
     val ctx = LocalContext.current
@@ -265,8 +418,13 @@ private fun Composer(text: String, onText: (String) -> Unit, connected: Boolean,
                     focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
                 modifier = Modifier.weight(1f),
             )
-            FilledIconButton(onClick = onSend, enabled = text.isNotBlank() || pending.isNotEmpty(), modifier = Modifier.size(56.dp)) {
-                Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.send))
+            // Tap sends; hold to choose a later time.
+            val canSend = text.isNotBlank() || pending.isNotEmpty()
+            Box(Modifier.size(56.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                .background(if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest)
+                .combinedClickable(enabled = canSend, onClick = onSend, onLongClick = onSchedule), contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.send),
+                    tint = if (canSend) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
       }
