@@ -373,4 +373,15 @@
     <string name="backup_pw_title">Backup password</string>
     <string name="backup_pw_export">Leave empty for a plain backup, or set a password to encrypt it.</string>
     <string name="backup_pw_import">Enter the password of this backup.</string>
+    <string name="vm_label">🎙 Voicemail %1$s</string>
+    <string name="vm_title">SimBridge voicemail</string>
+    <string name="vm_sub">Unanswered calls get a greeting; the message arrives here with its words written out.</string>
+    <string name="vm_edit">Edit what callers hear</string>
+    <string name="vm_greeting">Voicemail greeting</string>
+    <string name="screen_sub">Screen calls: the SIM phone answers, asks who is calling, and shows you the answer before your phone rings.</string>
+    <string name="screen_unknown">Unknown numbers</string>
+    <string name="screen_hidden">Hidden numbers</string>
+    <string name="screen_prompt">Screening question</string>
+    <string name="screen_title">%1$s says:</string>
+    <string name="screen_unclear">(Couldn\'t make out what they said)</string>
 </resources>

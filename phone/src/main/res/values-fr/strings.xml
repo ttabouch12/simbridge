@@ -337,4 +337,15 @@
     <string name="backup_pw_title">Mot de passe de la sauvegarde</string>
     <string name="backup_pw_export">Laissez vide pour une sauvegarde simple, ou définissez un mot de passe pour la chiffrer.</string>
     <string name="backup_pw_import">Saisissez le mot de passe de cette sauvegarde.</string>
+    <string name="vm_label">🎙 Message vocal %1$s</string>
+    <string name="vm_title">Messagerie SimBridge</string>
+    <string name="vm_sub">Les appels sans réponse entendent une annonce ; le message arrive ici avec son texte.</string>
+    <string name="vm_edit">Modifier ce qu\'entendent les appelants</string>
+    <string name="vm_greeting">Annonce de messagerie</string>
+    <string name="screen_sub">Filtrer les appels : le téléphone SIM répond, demande qui appelle et vous montre la réponse avant que votre téléphone sonne.</string>
+    <string name="screen_unknown">Numéros inconnus</string>
+    <string name="screen_hidden">Numéros masqués</string>
+    <string name="screen_prompt">Question de filtrage</string>
+    <string name="screen_title">%1$s dit :</string>
+    <string name="screen_unclear">(Impossible de comprendre ce qui a été dit)</string>
 </resources>

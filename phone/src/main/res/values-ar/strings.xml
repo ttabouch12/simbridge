@@ -337,4 +337,15 @@
     <string name="backup_pw_title">كلمة مرور النسخة الاحتياطية</string>
     <string name="backup_pw_export">اتركها فارغة لنسخة عادية، أو ضع كلمة مرور لتشفيرها.</string>
     <string name="backup_pw_import">أدخل كلمة مرور هذه النسخة.</string>
+    <string name="vm_label">🎙 بريد صوتي %1$s</string>
+    <string name="vm_title">البريد الصوتي من SimBridge</string>
+    <string name="vm_sub">تسمع المكالمات التي لم يُرد عليها ترحيبًا؛ وتصل الرسالة هنا مكتوبة.</string>
+    <string name="vm_edit">تعديل ما يسمعه المتصلون</string>
+    <string name="vm_greeting">ترحيب البريد الصوتي</string>
+    <string name="screen_sub">فرز المكالمات: يرد هاتف SIM ويسأل عن المتصل ويعرض الإجابة قبل أن يرن هاتفك.</string>
+    <string name="screen_unknown">الأرقام المجهولة</string>
+    <string name="screen_hidden">الأرقام المخفية</string>
+    <string name="screen_prompt">سؤال الفرز</string>
+    <string name="screen_title">%1$s يقول:</string>
+    <string name="screen_unclear">(تعذّر فهم ما قيل)</string>
 </resources>

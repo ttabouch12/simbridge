@@ -116,6 +116,11 @@ class MessageStore(context: Context) : SQLiteOpenHelper(context, "messages.db", 
         if (status == Msg.FAILED || (rank[status] ?: 0) > (rank[cur] ?: -1)) setStatus(id, status)
     }
 
+    fun setBody(id: Long, body: String) {
+        writableDatabase.execSQL("UPDATE m SET body=? WHERE id=?", arrayOf<Any>(body, id))
+        changed()
+    }
+
     fun setStatus(id: Long, status: Int) {
         writableDatabase.update("m", ContentValues().apply { put("status", status) }, "id=?", arrayOf(id.toString()))
         changed()

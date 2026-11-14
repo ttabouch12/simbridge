@@ -70,6 +70,7 @@ main phone only ever uses Wi-Fi. See the [disclaimer](DISCLAIMER.md).
 | 🎧 **HD voice** | 16 kHz wideband audio between the phones (L16), falling back to normal phone quality (G.711) when needed. |
 | 🔒 **Encrypted and paired** | Pair once by scanning a QR code. Signalling runs over **TLS** pinned to the SIM phone's key, audio over **SRTP**, and every call or text needs the paired password. Mobile-data and internet addresses are refused. |
 | 💬 **Texts, pictures and group chats** | A Google Messages-style app: conversations, contact photos, bubbles, notifications with **Reply** and **Mark as read**, **Sent / Delivered** reports, picture messages (MMS) and **group texts**. |
+| 📼 **Voicemail and call screening** | Unanswered calls leave a message that arrives written out; unknown callers can be asked who they are before your phone rings. |
 | 🧹 **Rules, spam filter, quiet hours** | Choose who always alerts, stays silent, is archived or blocked; promotions go to Archived; quiet hours let only VIP contacts through. |
 | 🔔 **App notifications from the SIM phone** | Your bank or carrier app on the SIM phone? Its notifications arrive as messages on the main phone. |
 | 🛡️ **Watchdog, daily report, charge limit** | The gateway restarts itself after a crash, sends a morning health text, and can stop charging at 80–95 %. |

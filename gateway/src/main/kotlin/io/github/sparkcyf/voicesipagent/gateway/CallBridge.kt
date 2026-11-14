@@ -207,6 +207,23 @@ class CallBridge(
         }
     }
 
+    /**
+     * Takes the caller's leg away from the current session (for voicemail): the main phone stops
+     * ringing, the session ends, and the inbound leg stays up. [then] runs on the bridge thread with
+     * the leg; nothing happens if the session already ended or was answered.
+     */
+    fun takeOver(s: BridgeSession, then: (CallLeg) -> Unit) = post {
+        if (session !== s || s.connectedAtMs != null) return@post
+        session = null
+        s.endedAtMs = System.currentTimeMillis()
+        s.answerTimer?.cancel(false)
+        s.mediaTimer?.cancel(false)
+        s.outbound?.let { if (it.state != LegState.ENDED) it.hangup(HangupCause.CANCELLED) }
+        log("$s handed to voicemail")
+        notifyChanged(s)
+        then(s.inbound)
+    }
+
     private fun endSession(s: BridgeSession, cause: HangupCause) {
         if (session !== s) return
         session = null

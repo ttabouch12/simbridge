@@ -261,6 +261,34 @@ fun SimPhoneScreen(
                             label = { Text(if (sec == 0) stringResource(R.string.off) else "$sec s") })
                     }
                 }
+                // SimBridge's own voicemail and call screening, run by the SIM phone.
+                ToggleRow(stringResource(R.string.vm_title), stringResource(R.string.vm_sub), s?.vmOn, online, null) {
+                    core.control.setMachine(voicemail = it)
+                }
+                Muted(stringResource(R.string.screen_sub))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
+                    listOf(0 to R.string.off, 1 to R.string.screen_unknown, 2 to R.string.screen_hidden).forEach { (m, label) ->
+                        FilterChip(s?.screenMode == m, { core.control.setMachine(screen = m) }, enabled = online, label = { Text(stringResource(label)) })
+                    }
+                }
+                var editPrompts by remember { mutableStateOf(false) }
+                TextButton({ editPrompts = true }, enabled = online && s != null) { Text(stringResource(R.string.vm_edit)) }
+                if (editPrompts && s != null) {
+                    var g by remember { mutableStateOf(s.greeting) }
+                    var q by remember { mutableStateOf(s.screenPrompt) }
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { editPrompts = false },
+                        title = { Text(stringResource(R.string.vm_edit)) },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                androidx.compose.material3.OutlinedTextField(g, { g = it.take(300) }, label = { Text(stringResource(R.string.vm_greeting)) })
+                                androidx.compose.material3.OutlinedTextField(q, { q = it.take(300) }, label = { Text(stringResource(R.string.screen_prompt)) })
+                            }
+                        },
+                        confirmButton = { TextButton({ core.control.setMachine(greeting = g, screenPrompt = q); editPrompts = false }) { Text(stringResource(R.string.save)) } },
+                        dismissButton = { TextButton({ editPrompts = false }) { Text(stringResource(R.string.cancel)) } },
+                    )
+                }
                 Spacer(Modifier.height(12.dp))
                 Text(stringResource(R.string.dash_audio_test), style = MaterialTheme.typography.bodyLarge)
                 Muted(stringResource(R.string.dash_audio_test_sub))

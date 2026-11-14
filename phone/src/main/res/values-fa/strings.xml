@@ -337,4 +337,15 @@
     <string name="backup_pw_title">رمز پشتیبان</string>
     <string name="backup_pw_export">برای پشتیبان ساده خالی بگذارید یا برای رمزگذاری رمز بگذارید.</string>
     <string name="backup_pw_import">رمز این پشتیبان را وارد کنید.</string>
+    <string name="vm_label">🎙 پیام صوتی %1$s</string>
+    <string name="vm_title">پیام‌گیر SimBridge</string>
+    <string name="vm_sub">تماس‌های بی‌پاسخ یک خوشامد می‌شنوند؛ پیام با متن نوشته‌شده به اینجا می‌رسد.</string>
+    <string name="vm_edit">ویرایش آنچه تماس‌گیرندگان می‌شنوند</string>
+    <string name="vm_greeting">خوشامد پیام‌گیر</string>
+    <string name="screen_sub">غربال تماس‌ها: گوشی سیم‌کارت پاسخ می‌دهد، می‌پرسد چه کسی است و پیش از زنگ گوشی شما پاسخ را نشان می‌دهد.</string>
+    <string name="screen_unknown">شماره‌های ناشناس</string>
+    <string name="screen_hidden">شماره‌های پنهان</string>
+    <string name="screen_prompt">پرسش غربال</string>
+    <string name="screen_title">%1$s می‌گوید:</string>
+    <string name="screen_unclear">(گفته‌ها قابل فهم نبود)</string>
 </resources>

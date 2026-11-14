@@ -337,4 +337,15 @@
     <string name="backup_pw_title">Contraseña de la copia</string>
     <string name="backup_pw_export">Déjalo vacío para una copia simple, o pon una contraseña para cifrarla.</string>
     <string name="backup_pw_import">Introduce la contraseña de esta copia.</string>
+    <string name="vm_label">🎙 Buzón de voz %1$s</string>
+    <string name="vm_title">Buzón de SimBridge</string>
+    <string name="vm_sub">Las llamadas sin respuesta oyen un saludo; el mensaje llega aquí con su texto.</string>
+    <string name="vm_edit">Editar lo que oyen las personas que llaman</string>
+    <string name="vm_greeting">Saludo del buzón</string>
+    <string name="screen_sub">Filtrar llamadas: el teléfono SIM contesta, pregunta quién llama y te muestra la respuesta antes de que suene tu teléfono.</string>
+    <string name="screen_unknown">Números desconocidos</string>
+    <string name="screen_hidden">Números ocultos</string>
+    <string name="screen_prompt">Pregunta de filtrado</string>
+    <string name="screen_title">%1$s dice:</string>
+    <string name="screen_unclear">(No se entendió lo que dijo)</string>
 </resources>

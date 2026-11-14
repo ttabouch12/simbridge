@@ -372,4 +372,15 @@
     <string name="backup_pw_title">Yedek şifresi</string>
     <string name="backup_pw_export">Düz yedek için boş bırakın veya şifrelemek için bir şifre girin.</string>
     <string name="backup_pw_import">Bu yedeğin şifresini girin.</string>
+    <string name="vm_label">🎙 Sesli mesaj %1$s</string>
+    <string name="vm_title">SimBridge sesli mesaj</string>
+    <string name="vm_sub">Cevapsız aramalar bir karşılama duyar; mesaj yazıya dökülmüş olarak buraya gelir.</string>
+    <string name="vm_edit">Arayanların duyacaklarını düzenle</string>
+    <string name="vm_greeting">Sesli mesaj karşılaması</string>
+    <string name="screen_sub">Aramaları filtrele: SIM telefon açar, kimin aradığını sorar ve telefonunuz çalmadan önce cevabı gösterir.</string>
+    <string name="screen_unknown">Bilinmeyen numaralar</string>
+    <string name="screen_hidden">Gizli numaralar</string>
+    <string name="screen_prompt">Filtreleme sorusu</string>
+    <string name="screen_title">%1$s diyor ki:</string>
+    <string name="screen_unclear">(Ne söylendiği anlaşılamadı)</string>
 </resources>
