@@ -201,6 +201,7 @@ class GatewayRuntime private constructor(context: Context) {
         if (started) return@execute
         started = true
         watchBattery()
+        control.start()
         cellular.onCallsChanged = { snapshot ->
             _health.update { it.copy(calls = snapshot, inCallServiceBound = CellularEndpoint.isInCallServiceBound) }
             worker.execute {
@@ -911,8 +912,8 @@ class GatewayRuntime private constructor(context: Context) {
     }
 
     /**
-     * Low-battery alerts to the main phone: once at 20 % and once at 10 % per discharge, reset when
-     * the charger is connected. Sent as a gateway text, so it waits in the queue if the link is down.
+     * Feeds the time-left estimate, and sends a second low-battery alert at 10 % (the first, at
+     * 20 %, comes from [GatewayAlerts]). Reset when the charger is connected.
      */
     private fun watchBattery() {
         val prefs = app.getSharedPreferences("control", Context.MODE_PRIVATE)
@@ -923,11 +924,11 @@ class GatewayRuntime private constructor(context: Context) {
                 if (level < 0) return
                 val pct = level * 100 / scale
                 val plugged = i.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0
+                BatteryEstimate.note(android.os.SystemClock.elapsedRealtime(), pct, plugged)
                 val warned = prefs.getInt("battery_warned", 100)
                 when {
                     plugged -> if (warned != 100) prefs.edit().putInt("battery_warned", 100).apply()
                     pct <= 10 && warned > 10 -> { prefs.edit().putInt("battery_warned", 10).apply(); alerts.post("🪫 The SIM phone battery is at $pct %. Plug it in soon, or calls and texts stop.") }
-                    pct <= 20 && warned > 20 -> { prefs.edit().putInt("battery_warned", 20).apply(); alerts.post("🔋 The SIM phone battery is at $pct %.") }
                 }
             }
         }, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))

@@ -23,6 +23,9 @@ data class GatewayStatus(
     val at: Long,
     val battery: Int?,
     val charging: Boolean,
+    /** Minutes until empty (from real drain) or until full; null while not known yet. */
+    val batteryMin: Int? = null,
+    val chargeMin: Int? = null,
     val powerSaver: Boolean,
     val dataOn: Boolean,
     val hotspot: Boolean,
@@ -44,6 +47,8 @@ data class GatewayStatus(
             at = System.currentTimeMillis(),
             battery = if (o.has("battery")) o.optInt("battery") else null,
             charging = o.optBoolean("charging"),
+            batteryMin = if (o.has("batteryMin")) o.optInt("batteryMin") else null,
+            chargeMin = if (o.has("chargeMin")) o.optInt("chargeMin") else null,
             powerSaver = o.optBoolean("powerSaver"),
             dataOn = o.optBoolean("dataOn"),
             hotspot = o.optBoolean("hotspot"),

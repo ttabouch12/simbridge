@@ -53,6 +53,40 @@ object Langs {
  */
 class Speech(private val ctx: Context, private val prefs: Prefs) {
     private val cloudSpeech get() = !prefs.translateOnDevice && prefs.groqKey.isNotBlank()
+    /** Live (while-speaking) captions need the cloud recognizer: the on-device one is too slow for it. */
+    val canLive get() = cloudSpeech
+
+    // Live captions are extras: they stay inside a share of the free tier's requests per minute
+    // and stop for a while after any failure, so the final captions always get through.
+    private val speechCalls = ArrayDeque<Long>()
+    @Volatile private var liveOffUntil = 0L
+
+    @Synchronized private fun noteSpeechCall(): Int {
+        val now = System.currentTimeMillis()
+        speechCalls.addLast(now)
+        while (speechCalls.isNotEmpty() && now - speechCalls.first() > 60_000) speechCalls.removeFirst()
+        return speechCalls.size
+    }
+
+    @Synchronized private fun liveBudget(): Boolean {
+        val now = System.currentTimeMillis()
+        return now > liveOffUntil && speechCalls.count { now - it <= 60_000 } < LIVE_PER_MIN
+    }
+
+    /** Words so far of a sentence still being spoken; null when skipped or failed (never falls back). */
+    fun transcribeLive(pcm: ShortArray, rate: Int, lang: String): String? {
+        if (!cloudSpeech || !liveBudget()) return null
+        return runCatching { groqTranscribe(pcm, rate, lang) }
+            .onFailure { liveOffUntil = System.currentTimeMillis() + 30_000; Log.w("translate: live caption skipped (${it.message})") }.getOrNull()
+    }
+
+    /** Cloud translation of a live line, streamed into [onPartial]; quiet on failure. */
+    fun translateLive(text: String, from: String, to: String, onPartial: (String) -> Unit) {
+        val e = prefs.translateEngine
+        val key = prefs.keyFor(e)
+        if (prefs.translateOnDevice || e == Engine.ON_DEVICE || key.isBlank() || !liveBudget()) return
+        runCatching { chat(e, key, text, from, to, emptyList(), onPartial) }.onFailure { liveOffUntil = System.currentTimeMillis() + 30_000 }
+    }
 
     fun transcribe(pcm: ShortArray, rate: Int, lang: String): String? {
         if (cloudSpeech) runCatching { return groqTranscribe(pcm, rate, lang) }
@@ -60,11 +94,18 @@ class Speech(private val ctx: Context, private val prefs: Prefs) {
         return OnDeviceStt.transcribe(ctx, pcm, rate, lang)
     }
 
-    /** [context]: the last few lines of the call, so short fragments translate correctly. */
-    fun translate(text: String, from: String, to: String, context: List<String>): String? {
+    /**
+     * [context]: the last few lines of the call, so short fragments translate correctly.
+     * [onPartial] gets the translation as it is written (cloud engines stream it word by word).
+     */
+    fun translate(text: String, from: String, to: String, context: List<String>, onPartial: ((String) -> Unit)? = null): String? {
         val e = prefs.translateEngine
         val key = prefs.keyFor(e)
-        if (!prefs.translateOnDevice && e != Engine.ON_DEVICE && key.isNotBlank()) runCatching { return chat(e, key, text, from, to, context) }
+        if (!prefs.translateOnDevice && e != Engine.ON_DEVICE && key.isNotBlank()) runCatching {
+            // Streamed first; if a provider's stream is odd, ask once more the plain way.
+            return if (onPartial == null) chat(e, key, text, from, to, context, null)
+            else runCatching { chat(e, key, text, from, to, context, onPartial) }.getOrElse { chat(e, key, text, from, to, context, null) }
+        }
             .onFailure { Log.w("translate: cloud translation failed, using on-device", it); Captions.say("Cloud translation failed (${it.message}); using on-device") }
         return OfflineTranslate.translate(ctx, text, from, to)
     }
@@ -85,6 +126,7 @@ class Speech(private val ctx: Context, private val prefs: Prefs) {
     }
 
     private fun groqTranscribe(pcm: ShortArray, rate: Int, lang: String): String {
+        noteSpeechCall()
         val boundary = "simbridge" + System.nanoTime()
         val c = post(Engine.GROQ_120B.base + "audio/transcriptions", prefs.groqKey, "multipart/form-data; boundary=$boundary")
         c.outputStream.use { o ->
@@ -101,7 +143,8 @@ class Speech(private val ctx: Context, private val prefs: Prefs) {
         return JSONObject(read(c)).getString("text")
     }
 
-    private fun chat(e: Engine, key: String, text: String, from: String, to: String, context: List<String>): String {
+    private fun chat(e: Engine, key: String, text: String, from: String, to: String, context: List<String>,
+                     onPartial: ((String) -> Unit)?): String {
         val model = prefs.translateModel.ifBlank { e.model }
         val earlier = if (context.isEmpty()) "" else
             "\nEarlier in this call (context only, do not translate):\n" + context.joinToString("\n")
@@ -115,8 +158,29 @@ class Speech(private val ctx: Context, private val prefs: Prefs) {
                         "keep meaning and tone, fix obvious recognition mistakes, keep names and numbers. Reply with the translation only.$earlier"))
                 .put(JSONObject().put("role", "user").put("content", text)))
         if (model.contains("gpt-oss")) body.put("reasoning_effort", "low")
+        if (onPartial != null) body.put("stream", true)
         val c = post(e.base + "chat/completions", key, "application/json")
         c.outputStream.use { it.write(body.toString().toByteArray()) }
+        if (onPartial != null) {
+            // Server-sent events: one "data: {json}" line per piece of text, then "data: [DONE]".
+            val code = c.responseCode
+            if (code !in 200..299) throw IOException("HTTP $code ${c.errorStream?.use { it.bufferedReader().readText() }.orEmpty().take(160)}")
+            val sb = StringBuilder()
+            c.inputStream.bufferedReader().use { r ->
+                while (true) {
+                    val line = r.readLine() ?: break
+                    if (!line.startsWith("data:")) continue
+                    val data = line.substring(5).trim()
+                    if (data == "[DONE]") break
+                    val delta = runCatching { JSONObject(data).getJSONArray("choices").getJSONObject(0).optJSONObject("delta") }.getOrNull() ?: continue
+                    if (delta.isNull("content")) continue
+                    val piece = delta.optString("content")
+                    if (piece.isNotEmpty()) { sb.append(piece); onPartial(sb.toString()) }
+                }
+            }
+            if (sb.isBlank()) throw IOException("empty stream")
+            return sb.toString()
+        }
         return JSONObject(read(c)).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
     }
 
@@ -141,6 +205,8 @@ class Speech(private val ctx: Context, private val prefs: Prefs) {
     }
 
     companion object {
+        private const val LIVE_PER_MIN = 12
+
         /** Lines Whisper invents from silence or noise (video-subtitle habits). */
         private val junk = listOf("altyazı", "izlediğiniz için", "abone ol", "thank you for watching", "thanks for watching",
             "subtitles by", "amara.org")

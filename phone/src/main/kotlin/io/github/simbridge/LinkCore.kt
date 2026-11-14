@@ -335,6 +335,23 @@ class LinkCore(val context: Context) {
         SystemSms.delete(context, store.deleteConversation(key))
     }
 
+    /** Deletes single messages here, their files, and their copies in the system Messages app. */
+    fun deleteMessages(ids: Collection<Long>) {
+        val sys = ids.mapNotNull { store.systemId(it) }
+        store.deleteMessages(ids).forEach { if (it.att.isNotBlank()) Mms.deleteFiles(context, it.att) }
+        SystemSms.delete(context, sys)
+    }
+
+    /** Sends the scheduled texts that are due. Waits while the SIM phone is out of reach. */
+    fun sendDueScheduled() {
+        if (status.value.state != LinkState.CONNECTED) return
+        store.scheduled(System.currentTimeMillis()).forEach { s ->
+            store.unschedule(s.id)
+            sendText(s.address, s.body, if (s.sim > 0) s.sim else simFor(s.address))
+            Log.i("scheduled text sent")
+        }
+    }
+
     /** Marks a conversation read here and in the system Messages app. */
     fun markRead(key: String) {
         SystemSms.markRead(context, store.markRead(key))

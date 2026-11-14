@@ -408,6 +408,9 @@ private fun Hero(s: GatewayStatus?, online: Boolean, detail: String) {
                 Spacer(Modifier.height(10.dp))
                 Text(if (s?.battery != null) "${s.battery}%" else "—", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
                 Muted(stringResource(if (s?.charging == true) R.string.dash_charging else R.string.dash_battery))
+                // Time left from the SIM phone's real drain (or to a full charge).
+                val mins = if (s?.charging == true) s.chargeMin else s?.batteryMin
+                if (mins != null) Muted(stringResource(if (s?.charging == true) R.string.dash_full_in else R.string.dash_time_left, duration(mins)))
                 Spacer(Modifier.height(10.dp))
                 Box(Modifier.background(if (online) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
                     RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 4.dp)) {
@@ -573,4 +576,11 @@ private fun Bars(level: Int) {
                 .background(if (level >= i) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(1.dp)))
         }
     }
+}
+
+/** "2 d 4 h", "14 h 20 min" or "35 min". */
+internal fun duration(minutes: Int): String = when {
+    minutes >= 48 * 60 -> "${minutes / 1440} d ${minutes % 1440 / 60} h"
+    minutes >= 60 -> "${minutes / 60} h ${minutes % 60} min"
+    else -> "$minutes min"
 }

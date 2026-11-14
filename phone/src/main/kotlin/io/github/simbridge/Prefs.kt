@@ -89,6 +89,14 @@ class Prefs(context: Context) {
         get() = p.getBoolean("places_auto", false)
         set(v) = p.edit().putBoolean("places_auto", v).apply()
 
+    /** What a swipe on a conversation does: "read", "archive", "delete", "pin" or "none". */
+    var swipeRight: String
+        get() = p.getString("swipe_right", "read")!!
+        set(v) = p.edit().putString("swipe_right", v).apply()
+    var swipeLeft: String
+        get() = p.getString("swipe_left", "archive")!!
+        set(v) = p.edit().putString("swipe_left", v).apply()
+
     /** Copy one-time codes from texts to the clipboard automatically. */
     var otpCopy: Boolean
         get() = p.getBoolean("otp_copy", true)
@@ -185,8 +193,13 @@ class Prefs(context: Context) {
 
     /** Translation: quiet time that ends a sentence. Shorter is faster but may split sentences. */
     var pauseMs: Int
-        get() = p.getInt("pause_ms", 600)
+        get() = p.getInt("pause_ms", 450)
         set(v) = p.edit().putInt("pause_ms", v).apply()
+
+    /** Translation: show words while they are still being spoken (cloud speech only). */
+    var liveCaptions: Boolean
+        get() = p.getBoolean("live_captions", true)
+        set(v) = p.edit().putBoolean("live_captions", v).apply()
 
     /** Translation: also read the caller's translated words to me in the earpiece. */
     var speakToMe: Boolean

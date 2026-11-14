@@ -133,6 +133,41 @@ object SmsSender {
     }
 }
 
+/**
+ * Time until empty, from the real drain of the current discharge. Percent readings are whole
+ * numbers, so only the moments the percent drops are used (the battery is then exactly at that
+ * level), and the rate comes from the last [WINDOW_MS] when that holds enough drops, so a recent
+ * change in use (hotspot on, a long call) shows up without one noisy step swinging the answer.
+ */
+object BatteryEstimate {
+    private const val WINDOW_MS = 3 * 3_600_000L
+    private const val KEEP_MS = 24 * 3_600_000L
+    /** (time, percent) at each drop while discharging; times from a clock that runs during sleep. */
+    private val drops = ArrayDeque<Pair<Long, Int>>()
+    private var lastPct = -1
+
+    @Synchronized fun note(nowMs: Long, pct: Int, charging: Boolean) {
+        if (charging || (lastPct >= 0 && pct > lastPct)) drops.clear()
+        else if (lastPct >= 0 && pct < lastPct) drops.addLast(nowMs to pct)
+        lastPct = if (charging) -1 else pct
+        while (drops.isNotEmpty() && nowMs - drops.first().first > KEEP_MS) drops.removeFirst()
+    }
+
+    /** Minutes until empty, or null until at least 2 % has drained over 10 minutes or more. */
+    @Synchronized fun minutesLeft(nowMs: Long): Int? {
+        val last = drops.lastOrNull() ?: return null
+        val recent = drops.filter { nowMs - it.first <= WINDOW_MS }
+        val first = (if (recent.size >= 4) recent else drops).first()
+        val drained = first.second - last.second
+        val took = last.first - first.first
+        if (drained < 2 || took < 10 * 60_000L) return null
+        val msPerPct = took.toDouble() / drained
+        // At the last drop the battery was exactly at last.second; time has passed since.
+        val left = last.second * msPerPct - (nowMs - last.first)
+        return (left / 60_000).toInt().coerceAtLeast(0)
+    }
+}
+
 object BatteryInfo {
     data class State(val percent: Int, val charging: Boolean)
     fun read(ctx: Context): State? {
