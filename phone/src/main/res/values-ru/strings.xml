@@ -337,4 +337,15 @@
     <string name="backup_pw_title">Пароль резервной копии</string>
     <string name="backup_pw_export">Оставьте пустым для обычной копии или задайте пароль для шифрования.</string>
     <string name="backup_pw_import">Введите пароль этой копии.</string>
+    <string name="vm_label">🎙 Голосовое сообщение %1$s</string>
+    <string name="vm_title">Автоответчик SimBridge</string>
+    <string name="vm_sub">Неотвеченные звонки слышат приветствие; сообщение приходит сюда с текстом.</string>
+    <string name="vm_edit">Изменить, что слышат звонящие</string>
+    <string name="vm_greeting">Приветствие автоответчика</string>
+    <string name="screen_sub">Проверка звонков: SIM-телефон отвечает, спрашивает, кто звонит, и показывает ответ до того, как зазвонит ваш телефон.</string>
+    <string name="screen_unknown">Неизвестные номера</string>
+    <string name="screen_hidden">Скрытые номера</string>
+    <string name="screen_prompt">Вопрос для проверки</string>
+    <string name="screen_title">%1$s говорит:</string>
+    <string name="screen_unclear">(Не удалось разобрать сказанное)</string>
 </resources>

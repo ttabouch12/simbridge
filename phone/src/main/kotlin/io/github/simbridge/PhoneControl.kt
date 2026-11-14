@@ -29,6 +29,11 @@ data class GatewayStatus(
     /** Samsung battery protection: "off", or the percent charging stops at. Null when unknown. */
     val chargeLimit: String? = null,
     val dailyReport: Boolean = true,
+    /** SimBridge voicemail on the SIM phone, call screening (0 off, 1 unknown, 2 hidden) and the spoken texts. */
+    val vmOn: Boolean = false,
+    val screenMode: Int = 0,
+    val greeting: String = "",
+    val screenPrompt: String = "",
     val powerSaver: Boolean,
     val dataOn: Boolean,
     val hotspot: Boolean,
@@ -54,6 +59,10 @@ data class GatewayStatus(
             chargeMin = if (o.has("chargeMin")) o.optInt("chargeMin") else null,
             chargeLimit = o.optString("chargeLimit").ifBlank { null },
             dailyReport = o.optBoolean("dailyReport", true),
+            vmOn = o.optBoolean("vmOn"),
+            screenMode = o.optInt("screenMode"),
+            greeting = o.optString("greeting"),
+            screenPrompt = o.optString("screenPrompt"),
             powerSaver = o.optBoolean("powerSaver"),
             dataOn = o.optBoolean("dataOn"),
             hotspot = o.optBoolean("hotspot"),
@@ -126,6 +135,8 @@ class PhoneControl(private val core: LinkCore) {
             "mms" -> core.onIncomingMms(o)
             "data-detail" -> _dataDetail.value = DataDetail.parse(o)
             "screen-ready" -> _screen.value = ScreenOffer.parse(o)
+            "voicemail-msg" -> Voicemails.onMessage(core.context, core, o)
+            "screened" -> Voicemails.onScreened(core.context, core, o)
             "apps" -> _apps.value = (o.optJSONArray("list") ?: JSONArray()).let { a ->
                 (0 until a.length()).map { a.getJSONObject(it).let { e -> e.optString("pkg") to e.optString("name") } }
             } to (o.optJSONArray("chosen") ?: JSONArray()).let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }
@@ -237,6 +248,11 @@ class PhoneControl(private val core: LinkCore) {
         send(JSONObject().put("op", "apn-add").put("name", name).put("apn", apn).put("mcc", mcc).put("mnc", mnc)
             .put("user", user).put("password", password))
     fun setNoAnswer(seconds: Int) = send(JSONObject().put("op", "voicemail").put("seconds", seconds))
+    fun setMachine(voicemail: Boolean? = null, screen: Int? = null, greeting: String? = null, screenPrompt: String? = null) =
+        send(JSONObject().put("op", "machine").apply {
+            voicemail?.let { put("voicemail", it) }; screen?.let { put("screen", it) }
+            greeting?.let { put("greeting", it) }; screenPrompt?.let { put("screenPrompt", it) }
+        })
     fun setChargeLimit(value: String) = send(JSONObject().put("op", "charge-limit").put("value", value))
     fun setDailyReport(on: Boolean) = send(JSONObject().put("op", "report").put("on", on)).also { refresh() }
 

@@ -127,6 +127,19 @@ class Notifier(private val context: Context, private val core: LinkCore) {
 
     fun cancel(key: String) = nm.cancel(key.hashCode())
 
+    /** Who a screened caller says they are; the call itself rings right after. */
+    fun screened(who: String, said: String) {
+        val n = Notification.Builder(context, CH_MISSED)
+            .setSmallIcon(R.drawable.ic_link)
+            .setContentTitle(context.getString(R.string.screen_title, who))
+            .setContentText(said)
+            .setStyle(Notification.BigTextStyle().bigText(said))
+            .setCategory(Notification.CATEGORY_CALL)
+            .setTimeoutAfter(60_000)
+            .setAutoCancel(true).build()
+        runCatching { nm.notify(ID_ALERT + 7, n) }
+    }
+
     fun callAccountOff() {
         val n = Notification.Builder(context, CH_ALERTS)
             .setSmallIcon(R.drawable.ic_link)

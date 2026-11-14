@@ -27,7 +27,7 @@ import org.json.JSONObject
  * persistent queue while no phone is registered.
  */
 /** Control operations that change something on this phone; each is written to the [Audit] log. */
-private val AUDITED = setOf("control", "ussd", "ussd-reply", "screen-start", "network-mode", "apn-select", "apn-add", "sms-app",
+private val AUDITED = setOf("machine", "control", "ussd", "ussd-reply", "screen-start", "network-mode", "apn-select", "apn-add", "sms-app",
     "at-place", "charge-limit", "locate", "block-rules", "voicemail")
 
 /** Who changed what on this phone, and when (the last 200 entries). */
@@ -63,6 +63,16 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
                 // Notification access, granted through Shizuku (same as a tap in Settings).
                 if (set.isNotEmpty()) privilegedRaw("notif-access", AppNotifications.COMPONENT)
                 send(JSONObject().put("op", "control-result").put("action", "notif-apps").put("ok", true), from)
+            }
+            "machine" -> {
+                prefs.edit().apply {
+                    if (o.has("voicemail")) putBoolean("vm_on", o.optBoolean("voicemail"))
+                    if (o.has("screen")) putInt("screen_mode", o.optInt("screen").coerceIn(0, 2))
+                    o.optString("greeting").takeIf { it.isNotBlank() }?.let { putString("vm_greeting", it.take(300)) }
+                    o.optString("screenPrompt").takeIf { it.isNotBlank() }?.let { putString("screen_prompt", it.take(300)) }
+                }.apply()
+                prompts.prepare(greeting); prompts.prepare(screenPrompt)
+                send(status(), from)
             }
             "audit" -> send(JSONObject().put("op", "audit").put("list", Audit.recent(app)), from)
             "charge-limit" -> rt.worker {
@@ -255,6 +265,7 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
         o.put("hotspot", hotspotOn())
         privilegedRaw("charge-limit-get", "").takeUnless { it.startsWith("error") }?.let { o.put("chargeLimit", it) }
         o.put("dailyReport", prefs.getBoolean("daily_report", true))
+        o.put("vmOn", voicemailOn).put("screenMode", screenMode).put("greeting", greeting).put("screenPrompt", screenPrompt)
         o.put("smsApp", MmsGateway.isDefaultSmsApp(app))
         o.put("noAnswerSec", noAnswerSec)
         if (hasPhoneState()) runCatching { app.getSystemService(TelephonyManager::class.java).voiceMailNumber }.getOrNull()?.let { o.put("voicemail", it) }
@@ -513,8 +524,40 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
 
     private var wifiWatch: android.net.ConnectivityManager.NetworkCallback? = null
 
+    // ------------------------------------------------------------ voicemail and call screening
+
+    val prompts = Prompts(app)
+    val voicemailOn: Boolean get() = prefs.getBoolean("vm_on", false)
+    /** 0 off, 1 numbers not in contacts (and hidden ones), 2 hidden numbers only. */
+    val screenMode: Int get() = prefs.getInt("screen_mode", 0)
+    val greeting: String get() = prefs.getString("vm_greeting", null)
+        ?: "Hello. I can't take your call right now. Please leave a message after the tone."
+    val screenPrompt: String get() = prefs.getString("screen_prompt", null)
+        ?: "Hello. Please say your name and why you are calling, then wait a moment."
+
+    fun shouldScreen(number: String?): Boolean = when (screenMode) {
+        1 -> number.isNullOrBlank() || (ContactNames.lookup(app, number) == null && !isBlocked(number))
+        2 -> number.isNullOrBlank()
+        else -> false
+    }
+
+    /** A message left after no answer; kept until the main phone has it. */
+    fun voicemailMessage(p: io.github.sparkcyf.voicesipagent.voice.Party, audio: ShortArray, rate: Int, at: Long) {
+        AppLog.i("voicemail message: ${audio.size * 1000L / rate} ms")
+        deliver(JSONObject().put("op", "voicemail-msg").put("from", p.number ?: "").put("name", ContactNames.lookup(app, p.number) ?: "")
+            .put("sim", p.sim ?: 0).put("at", at).put("rate", rate)
+            .put("wav", android.util.Base64.encodeToString(Wav.encode(audio, rate), android.util.Base64.NO_WRAP)))
+    }
+
+    /** What a screened caller said; only useful right now, so not kept. */
+    fun screened(p: io.github.sparkcyf.voicesipagent.voice.Party, audio: ShortArray, rate: Int) {
+        send(JSONObject().put("op", "screened").put("from", p.number ?: "").put("rate", rate)
+            .put("wav", android.util.Base64.encodeToString(Wav.encode(audio, rate), android.util.Base64.NO_WRAP)))
+    }
+
     /** Called once when the gateway starts. */
     fun start() {
+        prompts.prepare(greeting); prompts.prepare(screenPrompt)
         scheduleReport()
         if (prefs.getBoolean("crashed", false)) {
             prefs.edit().putBoolean("crashed", false).apply()

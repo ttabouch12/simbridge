@@ -1,5 +1,19 @@
 # Changelog
 
+## SimBridge 2.6.0
+
+Update both apps. Pairing is kept.
+
+- **SimBridge voicemail:** when you don't answer, the SIM phone takes the call, plays your greeting
+  and a tone, and records the message (up to 2 minutes). It arrives as a message from the caller
+  with the recording (play it in the chat) and its words written out (cloud or on-device speech,
+  as set for call translation). Turn it on in Dashboard > Controls > Calls; it rings for the
+  no-answer time first (25 s if that is off).
+- **Call screening:** for unknown or hidden numbers the SIM phone answers, asks who is calling and
+  why, and shows you what they said in a notification just before your phone rings. The caller
+  hears a waiting tone meanwhile. Note: a screened call counts as answered for the caller.
+- Both spoken texts can be changed (Dashboard > Controls > Calls > Edit what callers hear).
+
 ## SimBridge 2.5.0
 
 Update both apps. Pairing is kept.

@@ -707,7 +707,12 @@ class GatewayRuntime private constructor(context: Context) {
         // to be non-empty; "phone" is a readable placeholder when no DID/username is configured.
         val inboundTarget = s.inboundTarget.ifBlank { s.username.ifBlank { if (s.serverMode) "phone" else "" } }
         val b = CallBridge(
-            sideA = cellular,
+            // Some calls are answered and screened first (control.screenMode).
+            sideA = io.github.sparkcyf.voicesipagent.gateway.ScreeningEndpoint(cellular,
+                shouldScreen = { leg -> control.shouldScreen(leg.remote.number) },
+                prompt = { f -> control.prompts.get(control.screenPrompt, f) },
+                onScreened = { leg, audio, f -> control.screened(leg.remote, audio, f.sampleRate) },
+                log = { AppLog.i("bridge: $it") }),
             sideB = sideB,
             routeAtoB = { leg ->
                 if (control.isBlocked(leg.remote.number)) {
@@ -750,12 +755,25 @@ class GatewayRuntime private constructor(context: Context) {
         val st = s.outbound?.state
         // "Voicemail": an unanswered call is rejected after N seconds, so the carrier's
         // forwarding (busy / no answer) takes it to voicemail.
-        val sec = control.noAnswerSec
+        val sec = control.noAnswerSec.takeIf { it > 0 } ?: if (control.voicemailOn) 25 else 0
         if (sec > 0 && st == LegState.RINGING && s.connectedAtMs == null && s.endedAtMs == null && !noAnswer.containsKey(s.id)) {
             val r = Runnable {
                 if (s.connectedAtMs == null && s.endedAtMs == null) {
-                    AppLog.i("no answer after ${sec}s: handing the call to the carrier (voicemail)")
-                    s.inbound.hangup(io.github.sparkcyf.voicesipagent.voice.HangupCause.BUSY)
+                    val b = bridge
+                    if (control.voicemailOn && b != null) {
+                        // SimBridge's own voicemail: answer, record, send the message to the main phone.
+                        AppLog.i("no answer after ${sec}s: taking a message")
+                        b.takeOver(s) { leg ->
+                            io.github.sparkcyf.voicesipagent.gateway.Voicemail.record(leg,
+                                greeting = { f -> control.prompts.get(control.greeting, f) ?: ShortArray(0) },
+                                maxMs = 120_000,
+                                onMessage = { party, audio, f, at -> control.voicemailMessage(party, audio, f.sampleRate, at) },
+                                log = { AppLog.i("bridge: $it") })
+                        }
+                    } else {
+                        AppLog.i("no answer after ${sec}s: handing the call to the carrier (voicemail)")
+                        s.inbound.hangup(io.github.sparkcyf.voicesipagent.voice.HangupCause.BUSY)
+                    }
                 }
             }
             noAnswer[s.id] = r

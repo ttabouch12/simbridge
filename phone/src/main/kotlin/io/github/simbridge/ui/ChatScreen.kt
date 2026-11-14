@@ -1,6 +1,8 @@
 package io.github.simbridge.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.filled.ContentCopy
@@ -460,6 +462,24 @@ private fun AttachmentView(a: io.github.simbridge.Attachment, outgoing: Boolean)
         if (bmp != null) androidx.compose.foundation.Image(bmp, stringResource(R.string.picture),
             Modifier.padding(vertical = 2.dp).widthIn(max = 260.dp).clip(RoundedCornerShape(18.dp))
                 .clickable { open() }, contentScale = androidx.compose.ui.layout.ContentScale.FillWidth)
+        return
+    }
+    if (a.type.startsWith("audio/")) {
+        // Voicemail and voice notes play right here.
+        var player by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+        androidx.compose.runtime.DisposableEffect(a) { onDispose { player?.release() } }
+        androidx.compose.material3.AssistChip(onClick = {
+            val p = player
+            if (p != null) { p.release(); player = null }
+            else player = runCatching {
+                android.media.MediaPlayer().apply {
+                    setDataSource(io.github.simbridge.Mms.fileOf(ctx, a).path); prepare(); start()
+                    setOnCompletionListener { it.release(); player = null }
+                }
+            }.getOrNull()
+        }, label = { Text(a.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            leadingIcon = { Icon(if (player != null) Icons.Filled.Stop else Icons.Filled.PlayArrow, null) },
+            modifier = Modifier.padding(vertical = 2.dp))
         return
     }
     androidx.compose.material3.AssistChip(onClick = open, label = { Text(a.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
