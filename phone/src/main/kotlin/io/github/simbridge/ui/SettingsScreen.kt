@@ -129,16 +129,21 @@ fun SettingsScreen(core: LinkCore, onSimPhone: () -> Unit = {}, onBlocked: () ->
             var mirrorOn by remember { mutableStateOf(core.prefs.mirrorToSystem) }
             val paired = remember(tick) { core.prefs.paired }
             var autoRec by remember { mutableStateOf(core.prefs.autoRecord) }
+            var backupPw by remember { mutableStateOf<String?>(null) }
+            var pwAsk by remember { mutableStateOf<Pair<String, android.net.Uri?>?>(null) }
             val exportLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-                androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json")) { uri ->
+                androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
                 uri ?: return@rememberLauncherForActivityResult
-                val r = runCatching { io.github.simbridge.Backup.export(ctx, uri) }
+                val r = runCatching { io.github.simbridge.Backup.export(ctx, uri, backupPw) }
+                backupPw = null
                 android.widget.Toast.makeText(ctx, r.fold({ "Exported $it texts" }, { "Export failed: ${it.message}" }),
                     android.widget.Toast.LENGTH_LONG).show()
             }
             val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
                 androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
                 uri ?: return@rememberLauncherForActivityResult
+                // An encrypted file: ask for its password, then import.
+                if (runCatching { io.github.simbridge.Backup.isEncrypted(ctx, uri) }.getOrDefault(false)) { pwAsk = "import" to uri; return@rememberLauncherForActivityResult }
                 val r = runCatching { io.github.simbridge.Backup.import(ctx, uri) }
                 android.widget.Toast.makeText(ctx, r.fold({ "Imported $it texts" }, { "Import failed: ${it.message}" }),
                     android.widget.Toast.LENGTH_LONG).show()
@@ -197,6 +202,7 @@ fun SettingsScreen(core: LinkCore, onSimPhone: () -> Unit = {}, onBlocked: () ->
                     modifier = Modifier.padding(horizontal = 8.dp))
             }
             if (tab == 1) {
+                QuietCard(core)
                 Card(Icons.Filled.Phone, stringResource(R.string.set_calls),
                     if (accountOn) stringResource(R.string.set_calls_on)
                     else stringResource(R.string.set_calls_off),
@@ -252,6 +258,7 @@ fun SettingsScreen(core: LinkCore, onSimPhone: () -> Unit = {}, onBlocked: () ->
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+                RulesCard(core)
                 Card(Icons.Filled.Sms, stringResource(R.string.set_swipe), stringResource(R.string.set_swipe_text), ok = true) {
                     Column {
                         SwipePicker(stringResource(R.string.set_swipe_right), core.prefs.swipeRight) { core.prefs.swipeRight = it }
@@ -268,12 +275,42 @@ fun SettingsScreen(core: LinkCore, onSimPhone: () -> Unit = {}, onBlocked: () ->
                 Card(Icons.Filled.Sms, stringResource(R.string.set_backup),
                     stringResource(R.string.set_backup_text), ok = true) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilledTonalButton({ exportLauncher.launch("simbridge-backup-${java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())}.json") }) { Text("Export") }
+                        FilledTonalButton({ pwAsk = "export" to null }) { Text("Export") }
                         TextButton({ importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }) { Text("Import") }
                     }
                 }
+                pwAsk?.let { (mode, uri) ->
+                    var pw by remember { mutableStateOf("") }
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { pwAsk = null },
+                        title = { Text(stringResource(R.string.backup_pw_title)) },
+                        text = {
+                            Column {
+                                Text(stringResource(if (mode == "export") R.string.backup_pw_export else R.string.backup_pw_import))
+                                OutlinedTextField(pw, { pw = it }, singleLine = true,
+                                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+                            }
+                        },
+                        confirmButton = {
+                            TextButton({
+                                pwAsk = null
+                                if (mode == "export") {
+                                    backupPw = pw.ifEmpty { null }
+                                    exportLauncher.launch("simbridge-backup-${java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())}" +
+                                        if (pw.isEmpty()) ".json" else ".sbx")
+                                } else {
+                                    val r = runCatching { io.github.simbridge.Backup.import(ctx, uri!!, pw) }
+                                    android.widget.Toast.makeText(ctx, r.fold({ "Imported $it texts" }, { "Import failed: ${it.message}" }),
+                                        android.widget.Toast.LENGTH_LONG).show()
+                                }
+                            }, enabled = mode == "export" || pw.isNotEmpty()) { Text(stringResource(R.string.ok)) }
+                        },
+                        dismissButton = { TextButton({ pwAsk = null }) { Text(stringResource(R.string.cancel)) } },
+                    )
+                }
             }
             if (tab == 3) {
+                SecurityExtrasCard(core)
                 Card(Icons.Filled.Refresh, stringResource(R.string.set_updates),
                     latest?.let { stringResource(R.string.set_update_available, it) } ?: stringResource(R.string.set_updates_text, io.github.simbridge.BuildConfig.VERSION_NAME),
                     ok = latest == null) {
@@ -443,7 +480,7 @@ private fun TranslationCard(core: LinkCore) {
 }
 
 @Composable
-private fun SwitchRow(text: String, on: Boolean, set: (Boolean) -> Unit) {
+internal fun SwitchRow(text: String, on: Boolean, set: (Boolean) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
         Switch(on, set)

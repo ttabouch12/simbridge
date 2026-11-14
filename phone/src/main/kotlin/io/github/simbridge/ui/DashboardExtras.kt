@@ -1,5 +1,8 @@
 package io.github.simbridge.ui
 
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.PhoneMissed
 import androidx.compose.foundation.layout.FlowRow
@@ -228,5 +231,40 @@ fun MissedCalls(core: LinkCore) {
                 }
             }
         }
+    }
+}
+
+/** Pick apps on the SIM phone whose notifications come here as messages. */
+@Composable
+fun AppNotifSection(core: LinkCore, online: Boolean) {
+    val apps by core.control.apps.collectAsState()
+    var open by remember { mutableStateOf(false) }
+    var picked by remember { mutableStateOf<Set<String>?>(null) }
+    Section(Icons.Filled.Notifications, stringResource(R.string.notif_title), Tint.Purple) {
+        Muted(stringResource(R.string.notif_sub))
+        TextButton({ core.control.loadApps(); picked = null; open = true }, enabled = online) { Text(stringResource(R.string.notif_choose)) }
+    }
+    if (open) {
+        val list = apps
+        val sel = picked ?: list?.second ?: emptySet()
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text(stringResource(R.string.notif_title)) },
+            text = {
+                if (list == null) LinearProgressIndicator(Modifier.fillMaxWidth())
+                else androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                    items(list.first.size) { i ->
+                        val (pkg, name) = list.first[i]
+                        Row(Modifier.fillMaxWidth().clickable { picked = if (pkg in sel) sel - pkg else sel + pkg },
+                            verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.material3.Checkbox(pkg in sel, { picked = if (it) sel + pkg else sel - pkg })
+                            Text(name)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton({ core.control.setNotifApps(sel); open = false }, enabled = list != null) { Text(stringResource(R.string.save)) } },
+            dismissButton = { TextButton({ open = false }) { Text(stringResource(R.string.cancel)) } },
+        )
     }
 }

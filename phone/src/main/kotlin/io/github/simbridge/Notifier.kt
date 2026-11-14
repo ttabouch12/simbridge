@@ -21,6 +21,7 @@ class Notifier(private val context: Context, private val core: LinkCore) {
         nm.createNotificationChannel(NotificationChannel(CH_MESSAGES, context.getString(R.string.ch_messages), NotificationManager.IMPORTANCE_HIGH).apply {
             description = context.getString(R.string.ch_messages_d)
         })
+        nm.createNotificationChannel(NotificationChannel(CH_QUIET, context.getString(R.string.ch_quiet), NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel(CH_STATUS, context.getString(R.string.ch_status), NotificationManager.IMPORTANCE_MIN).apply {
             setShowBadge(false)
         })
@@ -53,7 +54,8 @@ class Notifier(private val context: Context, private val core: LinkCore) {
             .build()
     }
 
-    fun showMessages(key: String, address: String) {
+    /** [silent]: update the conversation's notification without sound or pop-up (rules, quiet hours). */
+    fun showMessages(key: String, address: String, silent: Boolean = false) {
         val unread = core.store.unreadIn(key)
         if (unread.isEmpty()) { nm.cancel(key.hashCode()); return }
         val info = core.contacts.lookup(address)
@@ -100,7 +102,7 @@ class Notifier(private val context: Context, private val core: LinkCore) {
                     .setCategories(setOf("android.shortcut.conversation"))
                     .setIntent(open).build())
         }
-        val n = Notification.Builder(context, CH_MESSAGES)
+        val n = Notification.Builder(context, if (silent) CH_QUIET else CH_MESSAGES)
             .setSmallIcon(R.drawable.ic_link)
             .setShortcutId("c:$key")
             .setLocusId(android.content.LocusId("c:$key"))
@@ -219,6 +221,7 @@ class Notifier(private val context: Context, private val core: LinkCore) {
 
     companion object {
         const val CH_MESSAGES = "messages"
+        const val CH_QUIET = "messages_quiet"
         const val CH_STATUS = "status"
         const val CH_ALERTS = "alerts"
         const val CH_MIC = "mic"

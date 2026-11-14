@@ -70,6 +70,9 @@ main phone only ever uses Wi-Fi. See the [disclaimer](DISCLAIMER.md).
 | 🎧 **HD voice** | 16 kHz wideband audio between the phones (L16), falling back to normal phone quality (G.711) when needed. |
 | 🔒 **Encrypted and paired** | Pair once by scanning a QR code. Signalling runs over **TLS** pinned to the SIM phone's key, audio over **SRTP**, and every call or text needs the paired password. Mobile-data and internet addresses are refused. |
 | 💬 **Texts, pictures and group chats** | A Google Messages-style app: conversations, contact photos, bubbles, notifications with **Reply** and **Mark as read**, **Sent / Delivered** reports, picture messages (MMS) and **group texts**. |
+| 🧹 **Rules, spam filter, quiet hours** | Choose who always alerts, stays silent, is archived or blocked; promotions go to Archived; quiet hours let only VIP contacts through. |
+| 🔔 **App notifications from the SIM phone** | Your bank or carrier app on the SIM phone? Its notifications arrive as messages on the main phone. |
+| 🛡️ **Watchdog, daily report, charge limit** | The gateway restarts itself after a crash, sends a morning health text, and can stop charging at 80–95 %. |
 | 👆 **Swipe, select, pin, archive, search** | Swipe a conversation (you choose what each direction does), select several for one action, pin, archive, star, search inside messages, tap links and phone numbers, and **send later** by holding Send. |
 | 📥 **System SMS integration (optional)** | Make SimBridge the **default SMS app**: "Message" buttons in Contacts and other apps open it, the Phone app's *Reply with message* sends through the SIM, and texts are saved to Android's SMS database. Or keep Google Messages as default and just copy relayed texts into it (read-only). |
 | 📵 **Missed calls while offline** | Calls the SIM phone gets while the main phone is out of reach are added to the Phone app's history with a *Call back* notification. |

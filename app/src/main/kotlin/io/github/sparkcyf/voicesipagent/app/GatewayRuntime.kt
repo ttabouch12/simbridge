@@ -900,15 +900,26 @@ class GatewayRuntime private constructor(context: Context) {
     }
 
     /** Forward an incoming cellular SMS to the registered phone (server mode) as a SIP MESSAGE. */
+    /** A notification from an app chosen on the main phone; arrives there as a text from "app". */
+    fun forwardAppNotification(app: String, text: String) = worker.execute {
+        val id = "a" + java.util.UUID.randomUUID().toString().replace("-", "").take(20)
+        val s = sip
+        val sent = s is SipUserAgent && s.sendMessage("app", text, app, TextMeta(ref = id)) { ok -> if (!ok) control.keepApp(app, text, id) }
+        if (!sent) control.keepApp(app, text, id)
+    }
+
     fun forwardSms(from: String?, text: String, subId: Int? = null) = worker.execute {
         val s = sip
         val sim = if (subId != null && Sims.dual(app)) Sims.slotForSubId(app, subId) else null
+        // One id per received text, kept on every resend: the main phone drops copies it already has
+        // (a reply lost on the Wi-Fi made the old gateway resend texts that had arrived).
+        val id = "g" + java.util.UUID.randomUUID().toString().replace("-", "").take(20)
         // Kept and resent on the next registration unless a phone confirms it.
-        val sent = s is SipUserAgent && s.sendMessage(from, text, ContactNames.lookup(app, from), TextMeta(sim = sim)) { ok ->
-            if (!ok) { AppLog.w("SMS not confirmed by any phone: kept for later"); control.keepSms(from, text, sim) }
+        val sent = s is SipUserAgent && s.sendMessage(from, text, ContactNames.lookup(app, from), TextMeta(ref = id, sim = sim)) { ok ->
+            if (!ok) { AppLog.w("SMS not confirmed by any phone: kept for later"); control.keepSms(from, text, sim, id) }
         }
         if (sent) AppLog.i("SMS forwarded to the registered phone")
-        else { AppLog.w("SMS kept: no phone registered"); control.keepSms(from, text, sim) }
+        else { AppLog.w("SMS kept: no phone registered"); control.keepSms(from, text, sim, id) }
     }
 
     /**

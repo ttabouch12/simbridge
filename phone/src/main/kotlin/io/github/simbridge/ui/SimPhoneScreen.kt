@@ -64,6 +64,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.filled.Settings
 import kotlinx.coroutines.launch
@@ -116,6 +117,7 @@ fun SimPhoneScreen(
     val pages = listOf(R.string.tab_messages, R.string.dash_tab_overview, R.string.dash_tab_controls, R.string.dash_ussd,
         R.string.dash_tab_data, R.string.dash_tab_places, R.string.speed_title)
     val pager = androidx.compose.foundation.pager.rememberPagerState(startPage) { pages.size }
+    val guard = rememberGuard(core)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     LaunchedEffect(online) { while (online) { core.control.refresh(); delay(30_000) } }
     LaunchedEffect(ussd) { if (ussd != null) waitingUssd = false }
@@ -217,7 +219,7 @@ fun SimPhoneScreen(
 
             if (tab == 1) Section(Icons.Filled.SettingsRemote, stringResource(R.string.dash_remote), Tint.Orange) {
                 ToggleRow(stringResource(R.string.dash_saver), stringResource(R.string.dash_saver_sub), s?.powerSaver, online,
-                    pending["power-saver"] as Boolean?) { core.control.control("power-saver", it) }
+                    pending["power-saver"] as Boolean?) { on -> guard { core.control.control("power-saver", on) } }
                 ToggleRow(stringResource(R.string.dash_mobile_data), stringResource(R.string.dash_mobile_data_sub), s?.dataOn, online,
                     pending["mobile-data"] as Boolean?) { confirm = "mobile-data" to it }
                 ToggleRow(stringResource(R.string.dash_hotspot), stringResource(R.string.dash_hotspot_sub), s?.hotspot, online,
@@ -232,9 +234,23 @@ fun SimPhoneScreen(
                         if (pending.containsKey("restart")) { Spinner(); Spacer(Modifier.width(8.dp)) }
                         Text(stringResource(R.string.dash_restart))
                     }
-                    androidx.compose.material3.FilledTonalButton(onRemote, enabled = online) { Text(stringResource(R.string.dash_remote_screen)) }
+                    androidx.compose.material3.FilledTonalButton({ guard(onRemote) }, enabled = online) { Text(stringResource(R.string.dash_remote_screen)) }
                 }
             }
+            // Samsung battery protection: stop charging at a level, for a phone that is always plugged in.
+            if (tab == 1) Section(Icons.Filled.BatteryChargingFull, stringResource(R.string.dash_charge_limit), Tint.Green) {
+                Muted(stringResource(R.string.dash_charge_limit_sub))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
+                    listOf("off", "80", "85", "90", "95").forEach { v ->
+                        FilterChip(s?.chargeLimit == v, { guard { core.control.setChargeLimit(v) } }, enabled = online,
+                            label = { Text(if (v == "off") stringResource(R.string.off) else "$v %") })
+                    }
+                }
+                ToggleRow(stringResource(R.string.dash_report), stringResource(R.string.dash_report_sub), s?.dailyReport, online, null) {
+                    core.control.setDailyReport(it)
+                }
+            }
+            if (tab == 1) AppNotifSection(core, online)
             if (tab == 4) PlacesSection(core, online)
 
             if (tab == 1) Section(Icons.Filled.Call, stringResource(R.string.dash_calls), Tint.Green) {
@@ -337,7 +353,8 @@ fun SimPhoneScreen(
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (inMenu) OutlinedButton({ core.control.ussdCancel(); code = "" }, Modifier.weight(1f)) { Text(stringResource(R.string.cancel)) }
                     Button({
-                        waitingUssd = if (inMenu) core.control.ussdReply(code) else core.control.ussd(code, ussdSim)
+                        val c = code
+                        guard { waitingUssd = if (inMenu) core.control.ussdReply(c) else core.control.ussd(c, ussdSim) }
                         code = ""
                     }, enabled = online && !waitingUssd && (if (inMenu) code.isNotEmpty() else code.endsWith("#")),
                         modifier = Modifier.weight(1f)) { Text(stringResource(if (inMenu) R.string.ussd_reply else R.string.send)) }
@@ -354,7 +371,7 @@ fun SimPhoneScreen(
             onDismissRequest = { confirm = null },
             title = { Text(stringResource(if (on) R.string.dash_turn_on_q else R.string.dash_turn_off_q, name)) },
             text = { Text(stringResource(if (on) R.string.dash_turn_on_text else R.string.dash_turn_off_text)) },
-            confirmButton = { TextButton({ core.control.control(action, on); confirm = null }) { Text(stringResource(R.string.ok)) } },
+            confirmButton = { TextButton({ guard { core.control.control(action, on) }; confirm = null }) { Text(stringResource(R.string.ok)) } },
             dismissButton = { TextButton({ confirm = null }) { Text(stringResource(R.string.cancel)) } },
         )
     }

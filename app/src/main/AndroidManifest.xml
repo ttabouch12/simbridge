@@ -127,6 +127,16 @@
             </intent-filter>
         </receiver>
         <receiver android:name=".MmsResultReceiver" android:exported="false" />
+        <receiver android:name=".GatewayWatchdog" android:exported="false" />
+        <service
+            android:name=".AppNotifications"
+            android:exported="true"
+            android:label="SimBridge"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
         <service
             android:name=".RespondViaMessageService"
             android:exported="true"
