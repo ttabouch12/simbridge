@@ -1,5 +1,33 @@
 # Changelog
 
+## SimBridge 2.5.0
+
+Update both apps. Pairing is kept.
+
+### Main phone
+- **No more doubled texts:** every text from the SIM phone carries an id, and a resend of one that
+  already arrived is dropped (ideas from SMS Gateway for Android's message ids).
+- **Rules and spam filter** (Settings > Messages): per sender, keyword or SIM choose *always alert*,
+  *silent*, *archive* or *block*. Unknown promotions with links go to Archived.
+- **Quiet hours with VIP contacts** (Settings > Calls): texts stay silent and calls don't ring at
+  night, except for the people you pick.
+- **App notifications from the SIM phone** (Dashboard > Controls): pick apps such as your bank;
+  their notifications arrive as messages.
+- **Suggested replies** in a chat (full build, made on the phone).
+- **Fingerprint lock** for remote screen, USSD and switches, and a **history** of what was changed
+  on the SIM phone (Settings > App).
+- **Encrypted backups:** set a password when exporting (AES-256-GCM); rules, quiet hours, VIP list
+  and swipe choices are included now.
+- **Charge limit** (80–95 %) and **daily report** switches on the dashboard.
+
+### SIM phone (gateway)
+- Resends can't run twice when the main phone registers twice in a row.
+- **Hotspot works while on Wi-Fi:** it leaves Wi-Fi and tries again.
+- **Watchdog:** restarts itself after a crash or when the system stops it, and tells the main phone.
+- **Daily report** at 9:00: battery, signal, data used, anything waiting.
+- **Audit log** of remote changes, and **app notification forwarding** (notification access is
+  granted through Shizuku).
+
 ## SimBridge 2.4.0
 
 Update both apps. Pairing is kept.

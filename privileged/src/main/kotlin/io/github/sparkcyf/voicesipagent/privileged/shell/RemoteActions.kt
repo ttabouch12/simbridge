@@ -32,7 +32,36 @@ internal object RemoteActions {
             val r = ShellEnv.run("svc", "data", if (on) "enable" else "disable")
             if (r.exit == 0) "mobile data ${if (on) "on" else "off"}" else "error: ${r.out.trim()}"
         }
-        "hotspot" -> hotspot(ctx, arg == "on")
+        "hotspot" -> {
+            var r = hotspot(ctx, arg == "on")
+            // Most phones can't host a hotspot while joined to Wi-Fi: leave Wi-Fi and try once more.
+            if (arg == "on" && r.contains("on Wi-Fi")) {
+                ShellEnv.run("svc", "wifi", "disable")
+                Thread.sleep(1500)
+                r = hotspot(ctx, true).let { if (it.startsWith("error")) it else "on (Wi-Fi turned off for it)" }
+            }
+            r
+        }
+        "notif-access" -> {
+            require(Regex("[a-z0-9._]+/[A-Za-z0-9._]+").matches(arg)) { "bad component" }
+            val r = ShellEnv.run("cmd", "notification", "allow_listener", arg)
+            if (r.exit == 0) "ok" else "error: ${r.out.trim()}"
+        }
+        // Samsung battery protection: "off", or the percent charging stops at (80..95).
+        "charge-limit" -> {
+            if (arg == "off") ShellEnv.run("settings", "put", "global", "protect_battery", "0")
+            else {
+                val pct = arg.toInt().coerceIn(80, 95)
+                ShellEnv.run("settings", "put", "global", "battery_protection_threshold", pct.toString())
+                ShellEnv.run("settings", "put", "global", "protect_battery", "1")
+            }
+            "ok"
+        }
+        "charge-limit-get" -> {
+            val on = ShellEnv.run("settings", "get", "global", "protect_battery").out.trim()
+            val pct = ShellEnv.run("settings", "get", "global", "battery_protection_threshold").out.trim()
+            if (on == "0" || on == "null" || on.isEmpty()) "off" else pct.ifEmpty { "80" }
+        }
         "screen-stream" -> ScreenStream.start(arg)
         "screen-stop" -> ScreenStream.stop()
         "ussd-dial" -> ussdDial(arg)

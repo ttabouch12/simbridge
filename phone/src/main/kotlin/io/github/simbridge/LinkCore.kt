@@ -43,6 +43,7 @@ data class LinkStatus(
 class LinkCore(val context: Context) {
     val prefs = Prefs(context)
     val store = MessageStore(context)
+    private val seen = SeenIds(context)
     val contacts = Contacts(context)
     val notifier = Notifier(context, this)
     val control = PhoneControl(this)
@@ -210,7 +211,7 @@ class LinkCore(val context: Context) {
         sipLog,
     ).apply {
         setIncomingCallHandler { leg -> onIncomingCall(leg) }
-        incomingMessageHandler = { number, name, text, meta -> onIncomingText(number, name, text, meta.sim ?: 0); true }
+        incomingMessageHandler = { number, name, text, meta -> onIncomingText(number, name, text, meta.sim ?: 0, meta.ref); true }
         controlHandler = { json, _ -> control.handle(json) }
         addStatusListener { _, _ -> kick() }
         start()
@@ -247,8 +248,15 @@ class LinkCore(val context: Context) {
     private fun onIncomingCall(leg: CallLeg) {
         legs[leg.id] = leg
         lastIncomingLeg = leg.id
-        leg.ring()
         val number = leg.remote.number ?: ""
+        // Quiet hours: only VIP contacts ring; the others go on to voicemail or a missed call.
+        if (Quiet.now(prefs) && !prefs.isVip(number)) {
+            Log.i("quiet hours: call not rung")
+            legs.remove(leg.id)
+            leg.hangup(HangupCause.BUSY)
+            return
+        }
+        leg.ring()
         Log.i("incoming call relayed by the SIM phone")
         val tm = context.getSystemService(TelecomManager::class.java)
         val inner = Bundle().apply { putString(Telecom.EXTRA_LEG, leg.id) }
@@ -281,20 +289,31 @@ class LinkCore(val context: Context) {
     }
 
     /** Also used by adb tests (ControlReceiver op "test-in"). */
-    fun onIncomingText(number: String?, name: String?, text: String, sim: Int = 0) {
+    fun onIncomingText(number: String?, name: String?, text: String, sim: Int = 0, id: String? = null) {
+        // Same id = a resend of a text that already arrived (its confirmation was lost on the way).
+        if (id != null && !seen.add(id)) { Log.i("resent text dropped"); return }
         if (number != "gateway" && prefs.isBlocked(number)) { Log.i("text from a blocked number dropped"); return }
         val address = when {
             number.isNullOrBlank() || number == "sms" -> name ?: "Unknown"
+            number == "app" -> name ?: "App"   // a notification forwarded from an app on the SIM phone
             number == "gateway" -> "SimBridge Gateway"
             else -> number
         }
         // The SIM phone resends a text when it got no confirmation, even if the first copy arrived.
         if (store.isRecentDuplicate(address, text)) { Log.i("duplicate text dropped"); return }
+        val rule = if (number == "gateway" || number == "app") null
+            else Rules.decide(prefs, address, contacts.lookup(address)?.name, text, sim)
+        if (rule?.action == Rules.Action.BLOCK) { Log.i("text dropped by a rule"); return }
         val time = System.currentTimeMillis()
-        val id = store.add(address, text, outgoing = false, status = Msg.RECEIVED, time = time, sim = sim)
-        if (number != "gateway") mirror(id, address, text, time, outgoing = false)
+        val msgId = store.add(address, text, outgoing = false, status = Msg.RECEIVED, time = time, sim = sim)
+        if (number != "gateway" && number != "app") mirror(msgId, address, text, time, outgoing = false)
         if (prefs.otpCopy) Otp.find(text)?.let { Otp.copy(context, it) }
-        notifier.showMessages(MessageStore.keyOf(address), address)
+        val key = MessageStore.keyOf(address)
+        when (rule?.action) {
+            Rules.Action.ARCHIVE -> { store.setArchived(setOf(key), true); Log.i("text archived (${rule.why})") }
+            Rules.Action.SILENT -> notifier.showMessages(key, address, silent = true)
+            else -> notifier.showMessages(key, address)
+        }
     }
 
     private fun mirror(id: Long, address: String, text: String, time: Long, outgoing: Boolean) {

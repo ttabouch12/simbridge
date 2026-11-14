@@ -15,7 +15,43 @@ import org.json.JSONObject
 object Backup {
     private const val FORMAT = "simbridge-backup"
 
-    fun export(ctx: Context, to: Uri): Int {
+    /** Thrown by [import] when the file is encrypted and no (or a wrong) password was given. */
+    class PasswordNeeded : Exception("This backup is protected by a password")
+
+    private val MAGIC = "SBX1".toByteArray()
+
+    /** AES-256-GCM with a key from the password (PBKDF2-SHA256, 210 000 rounds, random salt). */
+    private fun key(password: String, salt: ByteArray): javax.crypto.SecretKey {
+        val spec = javax.crypto.spec.PBEKeySpec(password.toCharArray(), salt, 210_000, 256)
+        val raw = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+        return javax.crypto.spec.SecretKeySpec(raw, "AES")
+    }
+
+    internal fun seal(plain: ByteArray, password: String): ByteArray {
+        val rnd = java.security.SecureRandom()
+        val salt = ByteArray(16).also(rnd::nextBytes); val iv = ByteArray(12).also(rnd::nextBytes)
+        val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(javax.crypto.Cipher.ENCRYPT_MODE, key(password, salt), javax.crypto.spec.GCMParameterSpec(128, iv))
+        return MAGIC + salt + iv + c.doFinal(plain)
+    }
+
+    internal fun open(data: ByteArray, password: String?): ByteArray {
+        if (data.size < 4 || !data.copyOf(4).contentEquals(MAGIC)) return data    // a plain (older) backup
+        if (password.isNullOrEmpty()) throw PasswordNeeded()
+        val salt = data.copyOfRange(4, 20); val iv = data.copyOfRange(20, 32)
+        val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(javax.crypto.Cipher.DECRYPT_MODE, key(password, salt), javax.crypto.spec.GCMParameterSpec(128, iv))
+        return runCatching { c.doFinal(data, 32, data.size - 32) }.getOrElse { throw PasswordNeeded() }
+    }
+
+    /** Settings that make this phone feel like yours again (no keys or passwords). */
+    private val SETTING_KEYS = listOf("swipe_right", "swipe_left", "rules", "spam_filter", "quiet_on", "quiet_start", "quiet_end",
+        "otp_copy", "live_captions", "lock_controls")
+
+    fun isEncrypted(ctx: Context, uri: Uri): Boolean =
+        ctx.contentResolver.openInputStream(uri)!!.use { s -> ByteArray(4).also { s.read(it) }.contentEquals(MAGIC) }
+
+    fun export(ctx: Context, to: Uri, password: String? = null): Int {
         val core = LinkApp.core(ctx)
         val msgs = core.store.all()
         val o = JSONObject()
@@ -23,7 +59,9 @@ object Backup {
             .put("settings", JSONObject()
                 .put("mirrorToSystem", core.prefs.mirrorToSystem)
                 .put("autoRecord", core.prefs.autoRecord)
-                .put("blockHidden", core.prefs.blockHidden))
+                .put("blockHidden", core.prefs.blockHidden)
+                .put("more", core.prefs.export(SETTING_KEYS))
+                .put("vip", JSONArray(core.prefs.vip.toList())))
             .put("blocked", JSONArray(core.prefs.blocked.toList()))
             .put("messages", JSONArray().apply {
                 msgs.forEach { m ->
@@ -39,20 +77,23 @@ object Backup {
                 if (f.exists() && !has(a.file)) put(a.file, android.util.Base64.encodeToString(f.readBytes(), android.util.Base64.NO_WRAP))
             } }
         })
-        ctx.contentResolver.openOutputStream(to, "wt")!!.use { it.write(o.toString().toByteArray()) }
+        val bytes = o.toString().toByteArray()
+        ctx.contentResolver.openOutputStream(to, "wt")!!.use { it.write(if (password.isNullOrEmpty()) bytes else seal(bytes, password)) }
         return msgs.size
     }
 
     /** Merges a backup into this phone; returns how many texts were added (duplicates skipped). */
-    fun import(ctx: Context, from: Uri): Int {
+    fun import(ctx: Context, from: Uri, password: String? = null): Int {
         val core = LinkApp.core(ctx)
-        val text = ctx.contentResolver.openInputStream(from)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+        val text = open(ctx.contentResolver.openInputStream(from)!!.use { it.readBytes() }, password).toString(Charsets.UTF_8)
         val o = JSONObject(text)
         require(o.optString("format") == FORMAT) { "Not a SimBridge backup" }
         o.optJSONObject("settings")?.let { s ->
             core.prefs.mirrorToSystem = s.optBoolean("mirrorToSystem", core.prefs.mirrorToSystem)
             core.prefs.autoRecord = s.optBoolean("autoRecord", core.prefs.autoRecord)
             core.prefs.blockHidden = s.optBoolean("blockHidden", core.prefs.blockHidden)
+            s.optJSONObject("more")?.let { core.prefs.import(it, SETTING_KEYS) }
+            s.optJSONArray("vip")?.let { a -> core.prefs.vip = core.prefs.vip + (0 until a.length()).map { a.getString(it) } }
         }
         o.optJSONObject("files")?.let { files ->
             val dir = java.io.File(ctx.filesDir, "mms").apply { mkdirs() }

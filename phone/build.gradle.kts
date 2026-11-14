@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.simbridge"
         minSdk = 34
         targetSdk = 36
-        versionCode = 250
-        versionName = "2.4.0"
+        versionCode = 260
+        versionName = "2.5.0"
     }
     // Same signing source as the gateway app: a git-ignored signing.properties in the project root.
     val localSigning = Properties().apply {
@@ -83,5 +83,6 @@ dependencies {
     "fullImplementation"("com.google.android.gms:play-services-code-scanner:16.1.0")
     // On-device Turkish/English translation for call captions (offline fallback).
     "fullImplementation"("com.google.mlkit:translate:17.0.3")
+    "fullImplementation"("com.google.mlkit:smart-reply:17.0.4")
 }
 

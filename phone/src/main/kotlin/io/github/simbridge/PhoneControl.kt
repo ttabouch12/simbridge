@@ -26,6 +26,9 @@ data class GatewayStatus(
     /** Minutes until empty (from real drain) or until full; null while not known yet. */
     val batteryMin: Int? = null,
     val chargeMin: Int? = null,
+    /** Samsung battery protection: "off", or the percent charging stops at. Null when unknown. */
+    val chargeLimit: String? = null,
+    val dailyReport: Boolean = true,
     val powerSaver: Boolean,
     val dataOn: Boolean,
     val hotspot: Boolean,
@@ -49,6 +52,8 @@ data class GatewayStatus(
             charging = o.optBoolean("charging"),
             batteryMin = if (o.has("batteryMin")) o.optInt("batteryMin") else null,
             chargeMin = if (o.has("chargeMin")) o.optInt("chargeMin") else null,
+            chargeLimit = o.optString("chargeLimit").ifBlank { null },
+            dailyReport = o.optBoolean("dailyReport", true),
             powerSaver = o.optBoolean("powerSaver"),
             dataOn = o.optBoolean("dataOn"),
             hotspot = o.optBoolean("hotspot"),
@@ -121,6 +126,12 @@ class PhoneControl(private val core: LinkCore) {
             "mms" -> core.onIncomingMms(o)
             "data-detail" -> _dataDetail.value = DataDetail.parse(o)
             "screen-ready" -> _screen.value = ScreenOffer.parse(o)
+            "apps" -> _apps.value = (o.optJSONArray("list") ?: JSONArray()).let { a ->
+                (0 until a.length()).map { a.getJSONObject(it).let { e -> e.optString("pkg") to e.optString("name") } }
+            } to (o.optJSONArray("chosen") ?: JSONArray()).let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }
+            "audit" -> _audit.value = (o.optJSONArray("list") ?: JSONArray()).let { a ->
+                (0 until a.length()).map { a.getJSONObject(it).let { e -> AuditEntry(e.optLong("t"), e.optString("what"), e.optString("from")) } }
+            }
             "speed-ready" -> _speed.value = o.optInt("port") to o.optString("token")
             "wifi-saved" -> _savedWifi.value = (o.optJSONArray("list") ?: JSONArray()).let { a -> (0 until a.length()).map { a.getString(it) } }
             "apns" -> _apns.value = (o.optJSONArray("list") ?: JSONArray()).let { a ->
@@ -226,6 +237,19 @@ class PhoneControl(private val core: LinkCore) {
         send(JSONObject().put("op", "apn-add").put("name", name).put("apn", apn).put("mcc", mcc).put("mnc", mnc)
             .put("user", user).put("password", password))
     fun setNoAnswer(seconds: Int) = send(JSONObject().put("op", "voicemail").put("seconds", seconds))
+    fun setChargeLimit(value: String) = send(JSONObject().put("op", "charge-limit").put("value", value))
+    fun setDailyReport(on: Boolean) = send(JSONObject().put("op", "report").put("on", on)).also { refresh() }
+
+    /** Changes made on the SIM phone (who and when), newest last. */
+    private val _audit = MutableStateFlow<List<AuditEntry>>(emptyList())
+    val audit: StateFlow<List<AuditEntry>> = _audit
+    fun loadAudit() = send(JSONObject().put("op", "audit"))
+
+    /** Apps on the SIM phone (package, name) and those whose notifications are forwarded. */
+    private val _apps = MutableStateFlow<Pair<List<Pair<String, String>>, Set<String>>?>(null)
+    val apps: StateFlow<Pair<List<Pair<String, String>>, Set<String>>?> = _apps
+    fun loadApps() { _apps.value = null; send(JSONObject().put("op", "apps")) }
+    fun setNotifApps(pkgs: Set<String>) = send(JSONObject().put("op", "notif-apps").put("list", JSONArray(pkgs.toList())))
 
     private val _audioTest = MutableStateFlow<String?>(null)
     /** Result of the last audio self-test, in plain words. */
@@ -358,3 +382,6 @@ class ScreenOffer(val port: Int, val key: String, val ivDown: String, val ivUp: 
 
 /** A Wi-Fi network where both phones should use Wi-Fi instead of the hotspot. */
 data class Place(val name: String, val ssid: String, val password: String)
+
+/** One change on the SIM phone: when, what, and from which address. */
+data class AuditEntry(val at: Long, val what: String, val from: String)

@@ -26,6 +26,24 @@ import org.json.JSONObject
  * events this phone reports (missed and blocked calls, SMS delivery). Events wait in a small
  * persistent queue while no phone is registered.
  */
+/** Control operations that change something on this phone; each is written to the [Audit] log. */
+private val AUDITED = setOf("control", "ussd", "ussd-reply", "screen-start", "network-mode", "apn-select", "apn-add", "sms-app",
+    "at-place", "charge-limit", "locate", "block-rules", "voicemail")
+
+/** Who changed what on this phone, and when (the last 200 entries). */
+object Audit {
+    private const val MAX = 200
+    @Synchronized fun note(ctx: android.content.Context, what: String, from: String?) {
+        val p = ctx.getSharedPreferences("audit", android.content.Context.MODE_PRIVATE)
+        val a = runCatching { JSONArray(p.getString("log", "[]")) }.getOrDefault(JSONArray())
+        a.put(JSONObject().put("t", System.currentTimeMillis()).put("what", what).put("from", from ?: ""))
+        while (a.length() > MAX) a.remove(0)
+        p.edit().putString("log", a.toString()).apply()
+    }
+    @Synchronized fun recent(ctx: android.content.Context): JSONArray =
+        runCatching { JSONArray(ctx.getSharedPreferences("audit", android.content.Context.MODE_PRIVATE).getString("log", "[]")) }.getOrDefault(JSONArray())
+}
+
 class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
     private val prefs = app.getSharedPreferences("control", Context.MODE_PRIVATE)
     private val main = Handler(Looper.getMainLooper())
@@ -34,7 +52,24 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
 
     fun handle(json: String, from: java.net.InetSocketAddress? = null) {
         val o = runCatching { JSONObject(json) }.getOrNull() ?: return
-        when (o.optString("op")) {
+        val op = o.optString("op")
+        if (op in AUDITED) Audit.note(app, op + (o.optString("action").ifBlank { "" }.let { if (it.isEmpty()) "" else " $it" }) +
+            (if (o.has("on")) (if (o.optBoolean("on")) " on" else " off") else ""), from?.address?.hostAddress)
+        when (op) {
+            "apps" -> rt.worker { send(JSONObject().put("op", "apps").put("list", launchableApps()).put("chosen", JSONArray(AppNotifications.chosen(app).toList())), from) }
+            "notif-apps" -> rt.worker {
+                val set = (o.optJSONArray("list") ?: JSONArray()).let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }
+                AppNotifications.choose(app, set)
+                // Notification access, granted through Shizuku (same as a tap in Settings).
+                if (set.isNotEmpty()) privilegedRaw("notif-access", AppNotifications.COMPONENT)
+                send(JSONObject().put("op", "control-result").put("action", "notif-apps").put("ok", true), from)
+            }
+            "audit" -> send(JSONObject().put("op", "audit").put("list", Audit.recent(app)), from)
+            "charge-limit" -> rt.worker {
+                privileged("charge-limit", o.optString("value", "off"))
+                send(status(), from)
+            }
+            "report" -> prefs.edit().putBoolean("daily_report", o.optBoolean("on", true)).apply()
             "status" -> send(status(), from)
             "ussd" -> ussd(o.optString("code"), o.optInt("sim", 0).takeIf { it > 0 }, from)
             "ussd-reply" -> rt.worker { ussdReply("", privilegedRaw("ussd-reply", o.optString("text").take(40)), from) }
@@ -88,8 +123,14 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
     }
 
     /** A relayed text that no phone confirmed. */
-    fun keepSms(from: String?, text: String, sim: Int?) =
-        keep(JSONObject().put("op", "__sms").put("from", from ?: "").put("text", text).apply { sim?.let { put("sim", it) } }, false)
+    fun keepSms(from: String?, text: String, sim: Int?, id: String) =
+        keep(JSONObject().put("op", "__sms").put("from", from ?: "").put("text", text).put("id", id).apply { sim?.let { put("sim", it) } }, false)
+
+    fun keepApp(app: String, text: String, id: String) =
+        keep(JSONObject().put("op", "__sms").put("from", "app").put("name", app).put("text", text).put("id", id), false)
+
+    /** Queue entries being sent right now: two registrations a second apart must not send them twice. */
+    private val inFlight = java.util.Collections.synchronizedSet(HashSet<Long>())
 
     private fun keep(o: JSONObject, big: Boolean) {
         if (big) { queueBig(o); return }
@@ -151,13 +192,19 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
         for (i in 0 until q.length()) {
             val o = q.getJSONObject(i)
             val qid = o.optLong("qid")
+            if (!inFlight.add(qid)) continue
             if (o.optString("op") == "__sms") {
                 val from = o.optString("from").ifBlank { null }
-                ua.sendMessage(from, o.optString("text"), ContactNames.lookup(app, from),
-                    io.github.sparkcyf.voicesipagent.sip.TextMeta(sim = o.optInt("sim", 0).takeIf { it > 0 })) { ok -> if (ok) unqueue(qid) }
+                val sent = ua.sendMessage(from, o.optString("text"), o.optString("name").ifBlank { null } ?: ContactNames.lookup(app, from),
+                    io.github.sparkcyf.voicesipagent.sip.TextMeta(ref = o.optString("id").ifBlank { null }, sim = o.optInt("sim", 0).takeIf { it > 0 })) { ok ->
+                    if (ok) unqueue(qid)
+                    inFlight.remove(qid)
+                }
+                if (!sent) inFlight.remove(qid)
             } else {
                 val body = JSONObject(o.toString()).apply { remove("qid") }.toString()
-                ua.sendControl(body) { code -> if (code in 200..299) unqueue(qid) }
+                val sent = ua.sendControl(body) { code -> if (code in 200..299) unqueue(qid); inFlight.remove(qid) }
+                if (!sent) inFlight.remove(qid)
             }
         }
         java.io.File(app.filesDir, "outbox").listFiles()?.sortedBy { it.name }?.forEach { f ->
@@ -206,6 +253,8 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
         o.put("uptimeMin", SystemClock.elapsedRealtime() / 60_000)
         o.put("version", runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull() ?: "")
         o.put("hotspot", hotspotOn())
+        privilegedRaw("charge-limit-get", "").takeUnless { it.startsWith("error") }?.let { o.put("chargeLimit", it) }
+        o.put("dailyReport", prefs.getBoolean("daily_report", true))
         o.put("smsApp", MmsGateway.isDefaultSmsApp(app))
         o.put("noAnswerSec", noAnswerSec)
         if (hasPhoneState()) runCatching { app.getSystemService(TelephonyManager::class.java).voiceMailNumber }.getOrNull()?.let { o.put("voicemail", it) }
@@ -386,6 +435,44 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
         return runCatching { svc.remoteAction(action, arg) }.getOrElse { "error: ${it.message}" }
     }
 
+    /** Apps with a launcher icon on this phone: package and name, sorted by name. */
+    private fun launchableApps(): JSONArray {
+        val pm = app.packageManager
+        val i = android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+        return JSONArray().apply {
+            pm.queryIntentActivities(i, 0).map { it.activityInfo.packageName to it.loadLabel(pm).toString() }
+                .distinctBy { it.first }.filter { it.first != app.packageName }.sortedBy { it.second.lowercase() }
+                .forEach { (p, l) -> put(JSONObject().put("pkg", p).put("name", l)) }
+        }
+    }
+
+    // ------------------------------------------------------------ daily report
+
+    /** Once a day (9:00) a short health text: battery, signal, data used, texts kept for later. */
+    private fun scheduleReport() {
+        val c = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 9); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
+            if (timeInMillis <= System.currentTimeMillis()) add(java.util.Calendar.DAY_OF_YEAR, 1)
+        }
+        main.postDelayed({ rt.worker { runCatching { sendReport() }; scheduleReport() } }, c.timeInMillis - System.currentTimeMillis())
+    }
+
+    private fun sendReport() {
+        if (!prefs.getBoolean("daily_report", true)) return
+        val s = status()
+        val lines = mutableListOf("📋 SIM phone daily report")
+        if (s.has("battery")) lines += "Battery ${s.optInt("battery")} %" + (if (s.optBoolean("charging")) ", charging" else "") +
+            (s.optString("chargeLimit").takeIf { it.isNotEmpty() && it != "off" }?.let { ", stops at $it %" } ?: "")
+        s.optJSONArray("sims")?.let { a -> for (i in 0 until a.length()) a.getJSONObject(i).let { sim ->
+            lines += "SIM ${i + 1}: " + listOf(sim.optString("carrier"), sim.optString("network"), sim.optInt("level", -1).let { if (it < 0) "" else "signal $it/4" })
+                .filter { it.isNotBlank() }.joinToString(", ")
+        } }
+        if (s.has("dataToday")) lines += "Mobile data today: ${android.text.format.Formatter.formatShortFileSize(app, s.optLong("dataToday"))}, this month ${android.text.format.Formatter.formatShortFileSize(app, s.optLong("dataMonth"))}"
+        val kept = runCatching { JSONArray(prefs.getString("queue", "[]")).length() }.getOrDefault(0)
+        if (kept > 0) lines += "$kept items waiting for the main phone"
+        rt.alerts.post(lines.joinToString("\n"))
+    }
+
     // ------------------------------------------------------------ remote screen
 
     /** Opens the encrypted screen stream socket and tells the phone where and with which key. */
@@ -428,6 +515,11 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
 
     /** Called once when the gateway starts. */
     fun start() {
+        scheduleReport()
+        if (prefs.getBoolean("crashed", false)) {
+            prefs.edit().putBoolean("crashed", false).apply()
+            rt.alerts.post("♻️ SimBridge on the SIM phone stopped unexpectedly and restarted itself.")
+        }
         watchWifiLoss()
         // After a restart away from every saved place: make sure the main phone can reach us.
         main.postDelayed({ rt.worker { hotspotIfNoWifi("started without Wi-Fi") } }, 45_000)

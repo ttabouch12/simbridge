@@ -89,6 +89,43 @@ class Prefs(context: Context) {
         get() = p.getBoolean("places_auto", false)
         set(v) = p.edit().putBoolean("places_auto", v).apply()
 
+    /** Message rules (JSON, see [Rules]), spam filter, quiet hours (minutes of the day) and VIP numbers. */
+    var rules: String
+        get() = p.getString("rules", "[]")!!
+        set(v) = p.edit().putString("rules", v).apply()
+    var spamFilter: Boolean
+        get() = p.getBoolean("spam_filter", true)
+        set(v) = p.edit().putBoolean("spam_filter", v).apply()
+    var quietOn: Boolean
+        get() = p.getBoolean("quiet_on", false)
+        set(v) = p.edit().putBoolean("quiet_on", v).apply()
+    var quietStart: Int
+        get() = p.getInt("quiet_start", 23 * 60)
+        set(v) = p.edit().putInt("quiet_start", v).apply()
+    var quietEnd: Int
+        get() = p.getInt("quiet_end", 7 * 60)
+        set(v) = p.edit().putInt("quiet_end", v).apply()
+    var vip: Set<String>
+        get() = p.getStringSet("vip", emptySet()).orEmpty().toSortedSet()
+        set(v) = p.edit().putStringSet("vip", v.toSet()).apply()
+    fun isVip(number: String?) = vip.any { io.github.sparkcyf.voicesipagent.voice.PhoneNumbers.same(number, it) }
+    /** Ask for the fingerprint before remote screen, USSD and switches on the SIM phone. */
+    var lockControls: Boolean
+        get() = p.getBoolean("lock_controls", false)
+        set(v) = p.edit().putBoolean("lock_controls", v).apply()
+
+    /** Plain settings by key, for backups (strings, booleans and numbers only). */
+    fun export(keys: List<String>): org.json.JSONObject = org.json.JSONObject().apply {
+        keys.forEach { k -> p.all[k]?.let { v -> if (v is String || v is Boolean || v is Int || v is Long) put(k, v) } }
+    }
+    fun import(o: org.json.JSONObject, keys: List<String>) {
+        val e = p.edit()
+        keys.filter { o.has(it) }.forEach { k ->
+            when (val v = o.get(k)) { is Boolean -> e.putBoolean(k, v); is Int -> e.putInt(k, v); is Long -> e.putLong(k, v); is String -> e.putString(k, v) }
+        }
+        e.apply()
+    }
+
     /** What a swipe on a conversation does: "read", "archive", "delete", "pin" or "none". */
     var swipeRight: String
         get() = p.getString("swipe_right", "read")!!

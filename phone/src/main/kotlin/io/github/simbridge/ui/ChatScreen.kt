@@ -1,6 +1,7 @@
 package io.github.simbridge.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Schedule
@@ -103,6 +104,11 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
     val version by core.store.version.collectAsState()
     val status by core.status.collectAsState()
     var msgs by remember { mutableStateOf(emptyList<Msg>()) }
+    // Suggested replies to the last incoming text (made on this phone).
+    var suggestions by remember { mutableStateOf(emptyList<String>()) }
+    LaunchedEffect(msgs.lastOrNull()?.id) {
+        suggestions = withContext(Dispatchers.Default) { io.github.simbridge.SmartReplies.suggest(msgs) }
+    }
     var draft by remember(key) { mutableStateOf(initialDraft) }
     var menu by remember { mutableStateOf(false) }
     // Long-press a bubble to select it; then tap others (copy, star, forward, details, delete).
@@ -203,6 +209,13 @@ fun ChatScreen(core: LinkCore, key: String, address: String, initialDraft: Strin
                     IconButton({ core.store.unschedule(sc.id) }) { Icon(Icons.Filled.Close, stringResource(R.string.cancel)) }
                 }
             }
+            if (suggestions.isNotEmpty() && draft.isEmpty() && pending.isEmpty())
+                Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    suggestions.forEach { t ->
+                        androidx.compose.material3.SuggestionChip({ core.sendText(address, t); suggestions = emptyList() }, label = { Text(t) })
+                    }
+                }
             Composer(draft, { draft = it }, connected = status.state == LinkState.CONNECTED,
                 onSchedule = { if (draft.isNotBlank() && pending.isEmpty()) scheduleAsk = true },
                 pending = pending, onAttach = {
