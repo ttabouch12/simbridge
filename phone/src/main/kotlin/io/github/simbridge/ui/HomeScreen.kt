@@ -67,6 +67,7 @@ fun HomeScreen(
     onRemote: () -> Unit,
     onSettingsSection: (Int) -> Unit,
     onBlocked: () -> Unit,
+    onDial: (String) -> Unit = {},
 ) {
     val pager = rememberPagerState(tab) { DESTS.size }
     val scope = rememberCoroutineScope()
@@ -97,7 +98,7 @@ fun HomeScreen(
             userScrollEnabled = pager.currentPage != Tabs.MESSAGES) { page ->
             when (page) {
                 Tabs.MESSAGES -> ConversationsScreen(core, onOpenChat, onNewChat) { scope.launch { pager.animateScrollToPage(Tabs.SETTINGS) } }
-                Tabs.CALLS -> CallsScreen(core, onTool, onSettingsSection, onBlocked, onOpenChat)
+                Tabs.CALLS -> CallsScreen(core, onTool, onSettingsSection, onBlocked, onOpenChat, onDial)
                 Tabs.SIM -> SimPhoneScreen(core, null, { t -> t?.let(onTool) }, onRemote)
                 else -> SettingsScreen(core, null, { s -> s?.let(onSettingsSection) })
             }

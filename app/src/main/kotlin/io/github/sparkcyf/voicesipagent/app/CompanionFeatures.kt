@@ -193,6 +193,55 @@ object BatteryEstimate {
     }
 }
 
+/**
+ * Better estimates from the battery's own meters: its charge counter (µAh left) and average
+ * current (µA). Smoothed over about 15 minutes so a short burst doesn't swing the answer, and
+ * usable at once (no waiting for whole-percent drops, nothing lost when the app restarts).
+ * Falls back to [BatteryEstimate] when the phone doesn't report them.
+ */
+object BatteryMeter {
+    private var avgUa = 0.0
+    private var lastAt = 0L
+    private var lastCharging: Boolean? = null
+
+    private fun bm(ctx: Context) = ctx.getSystemService(BatteryManager::class.java)
+    private fun prop(ctx: Context, id: Int) = runCatching { bm(ctx).getIntProperty(id) }.getOrDefault(Int.MIN_VALUE)
+        .takeIf { it != Int.MIN_VALUE && it != 0 }
+
+    /** Takes one reading; call on every battery change and about once a minute. */
+    @Synchronized fun sample(ctx: Context, charging: Boolean) {
+        val ua = (prop(ctx, BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE) ?: prop(ctx, BatteryManager.BATTERY_PROPERTY_CURRENT_NOW))
+            ?.let { kotlin.math.abs(it.toDouble()) }?.let { if (it < 20_000) it * 1000 else it } ?: return   // some phones report mA
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (lastCharging != charging || lastAt == 0L) avgUa = ua
+        else {
+            val a = ((now - lastAt) / 900_000.0).coerceIn(0.02, 1.0)   // ~15 min time constant
+            avgUa += a * (ua - avgUa)
+        }
+        lastAt = now; lastCharging = charging
+    }
+
+    /** Minutes until empty, or null if the meters aren't available. */
+    @Synchronized fun minutesLeft(ctx: Context): Int? {
+        if (lastCharging != false || avgUa < 30_000) return null
+        val uah = prop(ctx, BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)?.toDouble() ?: return null
+        return (uah / avgUa * 60).toInt().coerceIn(0, 7 * 24 * 60)
+    }
+
+    /** Minutes to a full charge: the phone's own figure when it has one, else from the charge rate. */
+    @Synchronized fun minutesToFull(ctx: Context, pct: Int): Int? {
+        if (pct >= 100) return 0
+        runCatching { bm(ctx).computeChargeTimeRemaining() }.getOrNull()?.takeIf { it > 0 }?.let { return (it / 60_000).toInt() }
+        if (lastCharging != true || avgUa < 50_000) return null
+        val uah = prop(ctx, BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)?.toDouble() ?: return null
+        val full = uah * 100 / pct.coerceAtLeast(1)
+        // Charging slows down near full: count the last 20 % at about half speed.
+        val fast = ((80 - pct).coerceAtLeast(0) / 100.0) * full
+        val slow = (full - uah - fast).coerceAtLeast(0.0)
+        return ((fast + slow * 2) / avgUa * 60).toInt().coerceIn(1, 24 * 60)
+    }
+}
+
 object BatteryInfo {
     data class State(val percent: Int, val charging: Boolean)
     fun read(ctx: Context): State? {

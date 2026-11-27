@@ -1,5 +1,6 @@
 package io.github.simbridge.ui
 
+import androidx.compose.material.icons.filled.ContentPaste
 import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
@@ -119,7 +120,8 @@ fun RemoteScreen(core: LinkCore, onBack: () -> Unit) {
         error = null
         client = ScreenClient(core.prefs.lastHost.orEmpty(), o, sf,
             onSize = { w, h -> real = w to h },
-            onEnd = { e -> error = e }).also { it.start() }
+            onEnd = { e -> error = e },
+            onClip = { text -> clipFromSim(ctx, text) }).also { it.start() }
     }
     // Full screen hides the phone's own bars too.
     DisposableEffect(full) {
@@ -129,6 +131,16 @@ fun RemoteScreen(core: LinkCore, onBack: () -> Unit) {
         onDispose { c?.show(WindowInsetsCompat.Type.systemBars()) }
     }
     fun key(code: Int) = client?.send("k $code")
+    // Shared clipboard: anything copied here while the remote screen is open goes to the SIM phone.
+    DisposableEffect(client) {
+        val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+        val l = android.content.ClipboardManager.OnPrimaryClipChangedListener {
+            val t = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString()
+            if (!t.isNullOrEmpty() && t != lastFromSim) client?.send("c $t")
+        }
+        cm.addPrimaryClipChangedListener(l)
+        onDispose { cm.removePrimaryClipChangedListener(l) }
+    }
 
     val video: @Composable (Modifier) -> Unit = { mod ->
         Box(mod, contentAlignment = Alignment.Center) {
@@ -185,6 +197,10 @@ fun RemoteScreen(core: LinkCore, onBack: () -> Unit) {
         if (!full) TopAppBar(title = { Text(stringResource(R.string.dash_remote_screen)) },
             navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
             actions = {
+                IconButton({
+                    val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                    cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString()?.let { client?.send("v $it") }
+                }, enabled = client != null) { Icon(Icons.Filled.ContentPaste, stringResource(R.string.remote_paste)) }
                 IconButton({ dialog = "unlock" }, enabled = client != null) { Icon(Icons.Filled.LockOpen, stringResource(R.string.remote_unlock)) }
                 IconButton({ dialog = "options" }) { Icon(Icons.Filled.Tune, stringResource(R.string.remote_options)) }
             })
@@ -290,4 +306,16 @@ private fun doUnlock(c: ScreenClient?, real: Pair<Int, Int>?, pin: String) {
         c.send("u $x ${h * 37 / 100}"); Thread.sleep(600)
         if (pin.isNotEmpty()) { c.send("s $pin"); Thread.sleep(200); c.send("k 66") }
     }.start()
+}
+
+/** Last text that came from the SIM phone, so it isn't sent straight back. */
+@Volatile private var lastFromSim: String? = null
+
+/** Text copied on the SIM phone: put it on this phone's clipboard too. */
+private fun clipFromSim(ctx: android.content.Context, text: String) {
+    lastFromSim = text
+    android.os.Handler(android.os.Looper.getMainLooper()).post {
+        ctx.getSystemService(android.content.ClipboardManager::class.java)
+            .setPrimaryClip(android.content.ClipData.newPlainText("SIM phone", text))
+    }
 }

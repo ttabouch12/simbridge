@@ -239,7 +239,7 @@
     <string name="speed_link">بين الهاتفين</string>
     <string name="speed_link_sub">زمن الاستجابة والسرعة عبر نقطة الاتصال أو Wi-Fi المشترك. لا يستهلك بيانات الجوال.</string>
     <string name="speed_internet">الإنترنت</string>
-    <string name="speed_internet_sub">من هذا الهاتف عبر بيانات الجوال في هاتف SIM. يستهلك نحو 35 ميغابايت.</string>
+    <string name="speed_internet_sub">من هذا الهاتف عبر بيانات هاتف SIM إلى خوادم fast.com من Netflix. قد يستهلك من 50 إلى 200 ميغابايت.</string>
     <string name="speed_run">بدء الاختبار</string>
     <string name="speed_ping">الاستجابة</string>
     <string name="speed_down">التنزيل</string>
@@ -471,8 +471,16 @@
     <string name="pane_chat">اختر محادثة أو ابدأ محادثة جديدة</string>
     <string name="call_alert_title">كيف ترن المكالمات على هذا الجهاز</string>
     <string name="call_alert_sub">للأجهزة اللوحية والأجهزة التي لا تحتوي على تطبيق الهاتف.</string>
-    <string name="call_alert_full">ملء الشاشة</string>
-    <string name="call_alert_full_sub">تفتح شاشة المكالمة حتى فوق شاشة القفل.</string>
+    <string name="call_alert_full">ملء الشاشة عند القفل</string>
+    <string name="call_alert_full_sub">عند القفل تفتح شاشة المكالمة. أثناء الاستخدام: إشعار منبثق به رد ورفض، مثل واتساب.</string>
     <string name="call_alert_notif">إشعار فقط</string>
     <string name="call_alert_notif_sub">إشعار به رد ورفض، مثل واتساب.</string>
+    <string name="close">إغلاق</string>
+    <string name="dial_ussd_wait">جارٍ سؤال هاتف SIM…</string>
+    <string name="call_back_to">العودة إلى المكالمة</string>
+    <string name="dash_full">مشحون بالكامل</string>
+    <string name="dash_internet_ms">الإنترنت · %1$d مللي ثانية</string>
+    <string name="dash_no_internet">لا يوجد إنترنت</string>
+    <string name="speed_server">الخوادم: %1$s (fast.com من Netflix)</string>
+    <string name="remote_paste">لصق على هاتف SIM</string>
 </resources>

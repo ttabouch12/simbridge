@@ -1,5 +1,7 @@
 package io.github.simbridge
 
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.core.tween
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -38,6 +40,8 @@ sealed interface Screen {
     data object Blocked : Screen
     data object Recordings : Screen
     data object Remote : Screen
+    /** The full-page keypad (devices without a Phone app). */
+    data class Dialer(val number: String = "") : Screen
 }
 
 class MainActivity : ComponentActivity() {
@@ -77,15 +81,26 @@ class MainActivity : ComponentActivity() {
                     }
                     io.github.simbridge.ui.ConfirmPairing(core, pendingPair.value) { pendingPair.value = null }
                     // Big screens: rail + list + detail. Remote control stays full screen.
-                    if (isWide() && s !is Screen.Remote) {
+                    if (isWide() && s !is Screen.Remote && s !is Screen.Dialer) {
                         WideHome(core, s) { next -> (next as? Screen.Home)?.let { lastTab = it.tab }; screen.value = next }
                         return@Surface
                     }
                     // Going deeper slides in from the side; changing place on the home only fades.
                     AnimatedContent(s, transitionSpec = {
-                        if (initialState is Screen.Home && targetState is Screen.Home) fadeIn() togetherWith fadeOut()
-                        else if (targetState is Screen.Home) (slideInHorizontally { -it / 4 } + fadeIn()) togetherWith (slideOutHorizontally { it / 4 } + fadeOut())
-                        else (slideInHorizontally { it / 4 } + fadeIn()) togetherWith (slideOutHorizontally { -it / 4 } + fadeOut())
+                        val ed = io.github.simbridge.ui.Motion.emphasizedDecelerate
+                        val ea = io.github.simbridge.ui.Motion.emphasizedAccelerate
+                        when {
+                            // Changing place: fade through (Material).
+                            initialState is Screen.Home && targetState is Screen.Home ->
+                                (fadeIn(tween(210, 90)) + scaleIn(tween(210, 90, ed), 0.94f)) togetherWith fadeOut(tween(90))
+                            // Going back: shared axis, right to left reversed.
+                            targetState is Screen.Home ->
+                                (slideInHorizontally(tween(350, easing = ed)) { -it / 8 } + fadeIn(tween(200, 50))) togetherWith
+                                    (slideOutHorizontally(tween(200, easing = ea)) { it / 8 } + fadeOut(tween(100)))
+                            // Going deeper: shared axis X.
+                            else -> (slideInHorizontally(tween(350, easing = ed)) { it / 8 } + fadeIn(tween(200, 50))) togetherWith
+                                (slideOutHorizontally(tween(200, easing = ea)) { -it / 8 } + fadeOut(tween(100)))
+                        }
                     }, contentKey = { if (it is Screen.Home) "home" else it.toString() }, label = "nav") { cur ->
                         when (cur) {
                             is Screen.Home -> io.github.simbridge.ui.HomeScreen(core, cur.tab,
@@ -95,11 +110,13 @@ class MainActivity : ComponentActivity() {
                                 onTool = { screen.value = Screen.Tool(it) },
                                 onRemote = { screen.value = Screen.Remote },
                                 onSettingsSection = { screen.value = Screen.Settings(it) },
-                                onBlocked = { screen.value = Screen.Blocked })
+                                onBlocked = { screen.value = Screen.Blocked },
+                                onDial = { screen.value = Screen.Dialer(it) })
                             is Screen.Tool -> io.github.simbridge.ui.SimPhoneScreen(core, cur.tool,
                                 onTool = { t -> screen.value = if (t == null) Screen.Home(lastTab) else Screen.Tool(t) },
                                 onRemote = { screen.value = Screen.Remote })
                             Screen.Remote -> io.github.simbridge.ui.RemoteScreen(core) { home(io.github.simbridge.ui.Tabs.SIM) }
+                            is Screen.Dialer -> io.github.simbridge.ui.DialerScreen(core, cur.number) { home(io.github.simbridge.ui.Tabs.CALLS) }
                             is Screen.Chat -> ChatScreen(core, cur.key, cur.address, cur.draft) { home(io.github.simbridge.ui.Tabs.MESSAGES) }
                             Screen.NewChat -> NewChatScreen(core, { home(io.github.simbridge.ui.Tabs.MESSAGES) }) { k, a -> screen.value = Screen.Chat(k, a) }
                             is Screen.Settings -> SettingsScreen(core, cur.section,

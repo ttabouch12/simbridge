@@ -239,7 +239,7 @@
     <string name="speed_link">بین دو گوشی</string>
     <string name="speed_link_sub">پینگ و سرعت از طریق هات‌اسپات یا وای‌فای مشترک. از داده همراه استفاده نمی‌کند.</string>
     <string name="speed_internet">اینترنت</string>
-    <string name="speed_internet_sub">از این گوشی با داده همراه گوشی سیم‌کارت. حدود ۳۵ مگابایت مصرف می‌کند.</string>
+    <string name="speed_internet_sub">از این گوشی از طریق داده همراه گوشی سیم‌کارت به سرورهای fast.com نتفلیکس. ممکن است ۵۰ تا ۲۰۰ مگابایت مصرف کند.</string>
     <string name="speed_run">شروع آزمایش</string>
     <string name="speed_ping">پینگ</string>
     <string name="speed_down">دانلود</string>
@@ -471,8 +471,16 @@
     <string name="pane_chat">یک گفتگو انتخاب کنید یا گفتگوی جدیدی شروع کنید</string>
     <string name="call_alert_title">نحوه زنگ خوردن تماس‌ها در این دستگاه</string>
     <string name="call_alert_sub">برای تبلت‌ها و دستگاه‌های بدون برنامه تلفن.</string>
-    <string name="call_alert_full">تمام‌صفحه</string>
-    <string name="call_alert_full_sub">صفحه تماس باز می‌شود، حتی روی صفحه قفل.</string>
+    <string name="call_alert_full">تمام‌صفحه هنگام قفل</string>
+    <string name="call_alert_full_sub">قفل: صفحه تماس باز می‌شود. در حال استفاده: اعلان بازشو با پاسخ و رد، مثل واتس‌اپ.</string>
     <string name="call_alert_notif">فقط اعلان</string>
     <string name="call_alert_notif_sub">یک اعلان با پاسخ و رد، مثل واتس‌اپ.</string>
+    <string name="close">بستن</string>
+    <string name="dial_ussd_wait">در حال پرسیدن از گوشی سیم‌کارت…</string>
+    <string name="call_back_to">بازگشت به تماس</string>
+    <string name="dash_full">کاملاً شارژ شده</string>
+    <string name="dash_internet_ms">اینترنت · %1$d میلی‌ثانیه</string>
+    <string name="dash_no_internet">بدون اینترنت</string>
+    <string name="speed_server">سرورها: %1$s (fast.com نتفلیکس)</string>
+    <string name="remote_paste">چسباندن در گوشی سیم‌کارت</string>
 </resources>

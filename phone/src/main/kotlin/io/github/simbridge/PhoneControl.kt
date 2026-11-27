@@ -26,6 +26,8 @@ data class GatewayStatus(
     /** Minutes until empty (from real drain) or until full; null while not known yet. */
     val batteryMin: Int? = null,
     val chargeMin: Int? = null,
+    /** The SIM phone's last ping to the internet in ms; -1 = no internet; null = unknown. */
+    val pingMs: Int? = null,
     /** Samsung battery protection: "off", or the percent charging stops at. Null when unknown. */
     val chargeLimit: String? = null,
     val dailyReport: Boolean = true,
@@ -71,6 +73,7 @@ data class GatewayStatus(
             charging = o.optBoolean("charging"),
             batteryMin = if (o.has("batteryMin")) o.optInt("batteryMin") else null,
             chargeMin = if (o.has("chargeMin")) o.optInt("chargeMin") else null,
+            pingMs = if (o.has("pingMs")) o.optInt("pingMs") else null,
             chargeLimit = o.optString("chargeLimit").ifBlank { null },
             dailyReport = o.optBoolean("dailyReport", true),
             vmOn = o.optBoolean("vmOn"),

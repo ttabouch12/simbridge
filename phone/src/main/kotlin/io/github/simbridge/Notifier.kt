@@ -204,7 +204,10 @@ class Notifier(private val context: Context, private val core: LinkCore) {
         val n = Notification.Builder(context, CH_RING)
             .setSmallIcon(R.drawable.ic_link)
             .setStyle(Notification.CallStyle.forIncomingCall(android.app.Person.Builder().setName(name).setImportant(true).build(),
-                act(RecordReceiver.DECLINE, 13), act(RecordReceiver.ANSWER, 14)))
+                act(RecordReceiver.DECLINE, 13),
+                // Answer opens the call screen itself: a broadcast can't start an activity (Android 12+).
+                PendingIntent.getActivity(context, 14, Intent(context, CallActivity::class.java).setAction(CallActivity.ANSWER)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)))
             .apply { if (core.prefs.fullScreenCalls) setFullScreenIntent(screen, true) }
             .setContentIntent(screen)
             .setCategory(Notification.CATEGORY_CALL)

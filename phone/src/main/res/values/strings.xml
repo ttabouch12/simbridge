@@ -275,7 +275,7 @@
     <string name="speed_link">Between the phones</string>
     <string name="speed_link_sub">Ping and speed over the hotspot or shared Wi-Fi. Uses no mobile data.</string>
     <string name="speed_internet">Internet</string>
-    <string name="speed_internet_sub">From this phone through the SIM phone\'s mobile data. Uses about 35 MB.</string>
+    <string name="speed_internet_sub">From this phone through the SIM phone\'s mobile data, to Netflix\'s fast.com servers. Can use 50 to 200 MB.</string>
     <string name="speed_run">Run test</string>
     <string name="speed_ping">Ping</string>
     <string name="speed_down">Download</string>
@@ -507,8 +507,16 @@
     <string name="pane_chat">Choose a conversation, or start a new one</string>
     <string name="call_alert_title">How calls ring on this device</string>
     <string name="call_alert_sub">For tablets and devices without a Phone app.</string>
-    <string name="call_alert_full">Full screen</string>
-    <string name="call_alert_full_sub">The call screen opens, even over the lock screen.</string>
+    <string name="call_alert_full">Full screen when locked</string>
+    <string name="call_alert_full_sub">Locked: the call screen opens. In use: a pop-up with Answer and Decline, like WhatsApp.</string>
     <string name="call_alert_notif">Notification only</string>
     <string name="call_alert_notif_sub">A notification with Answer and Decline, like WhatsApp.</string>
+    <string name="close">Close</string>
+    <string name="dial_ussd_wait">Asking the SIM phone…</string>
+    <string name="call_back_to">Back to the call</string>
+    <string name="dash_full">Fully charged</string>
+    <string name="dash_internet_ms">Internet · %1$d ms</string>
+    <string name="dash_no_internet">No internet</string>
+    <string name="speed_server">Servers: %1$s (fast.com by Netflix)</string>
+    <string name="remote_paste">Paste to SIM phone</string>
 </resources>

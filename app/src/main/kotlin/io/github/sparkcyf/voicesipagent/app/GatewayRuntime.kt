@@ -991,6 +991,7 @@ class GatewayRuntime private constructor(context: Context) {
                 val pct = level * 100 / scale
                 val plugged = i.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0
                 BatteryEstimate.note(android.os.SystemClock.elapsedRealtime(), pct, plugged)
+                BatteryMeter.sample(c, plugged)
                 val warned = prefs.getInt("battery_warned", 100)
                 when {
                     plugged -> if (warned != 100) prefs.edit().putInt("battery_warned", 100).apply()

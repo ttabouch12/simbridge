@@ -62,6 +62,7 @@ class CallActivity : ComponentActivity() {
         setShowWhenLocked(true)
         setTurnScreenOn(true)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        answerIfAsked(intent)
         setContent {
             LinkTheme {
                 val ui by ActiveCall.ui.collectAsState()
@@ -71,7 +72,18 @@ class CallActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        answerIfAsked(intent)
+    }
+
+    private fun answerIfAsked(i: Intent?) {
+        if (i?.action == ANSWER) ActiveCall.shown?.answerFromScreen()
+    }
+
     companion object {
+        const val ANSWER = "io.github.simbridge.ANSWER_CALL"
+
         fun open(context: Context) = runCatching {
             context.startActivity(Intent(context, CallActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
         }
@@ -124,7 +136,7 @@ private fun CallScreen(ui: CallUi) {
 @Composable
 private fun Toggle(icon: ImageVector, label: Int, on: Boolean, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        FilledTonalIconToggleButton(on, { onClick() }, Modifier.size(64.dp)) { Icon(icon, stringResource(label)) }
+        FilledTonalIconToggleButton(on, { onClick() }, Modifier.size(76.dp)) { Icon(icon, stringResource(label)) }
         Text(stringResource(label), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 4.dp))
     }
 }
@@ -132,7 +144,7 @@ private fun Toggle(icon: ImageVector, label: Int, on: Boolean, onClick: () -> Un
 @Composable
 private fun Round(icon: ImageVector, label: Int, color: Color, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        FilledIconButton(onClick, Modifier.size(72.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = color)) {
+        FilledIconButton(onClick, Modifier.size(88.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = color)) {
             Icon(icon, stringResource(label), tint = Color.White)
         }
         Text(stringResource(label), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 4.dp))

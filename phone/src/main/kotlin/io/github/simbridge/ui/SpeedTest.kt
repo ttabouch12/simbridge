@@ -39,7 +39,7 @@ import java.net.Socket
 import java.net.URL
 
 /** Ping, download and upload results; null = not measured. */
-private data class Speed(val pingMs: Double? = null, val downMbps: Double? = null, val upMbps: Double? = null, val error: String? = null)
+private data class Speed(val pingMs: Double? = null, val downMbps: Double? = null, val upMbps: Double? = null, val error: String? = null, val server: String? = null)
 
 /** Speed between the two phones (over the hotspot or home Wi-Fi) and from this phone to the internet. */
 @Composable
@@ -87,6 +87,7 @@ private fun Result(s: Speed?, running: Boolean) {
         Big(stringResource(R.string.speed_down), s.downMbps?.let { "%.1f Mb/s".format(it) }, Modifier.weight(1f))
         Big(stringResource(R.string.speed_up), s.upMbps?.let { "%.1f Mb/s".format(it) }, Modifier.weight(1f))
     }
+    if (s?.server != null) Muted(stringResource(R.string.speed_server, s.server))
 }
 
 @Composable
@@ -129,29 +130,7 @@ private fun linkTest(host: String, port: Int, token: String): Speed {
     }
 }
 
-/** Cloudflare's public speed test endpoints: about 25 MB down and 10 MB up of mobile data. */
-private fun internetTest(): Speed {
-    fun open(u: String) = (URL(u).openConnection() as HttpURLConnection).apply { connectTimeout = 8000; readTimeout = 15_000 }
-    val pings = (1..5).map {
-        val t = System.nanoTime()
-        open("https://speed.cloudflare.com/__down?bytes=0").run { inputStream.use { it.readBytes() }; disconnect() }
-        (System.nanoTime() - t) / 1e6
-    }.sorted()
-    val buf = ByteArray(64 * 1024)
-    var got = 0L
-    val t0 = System.nanoTime()
-    open("https://speed.cloudflare.com/__down?bytes=25000000").run {
-        inputStream.use { s -> while (System.nanoTime() - t0 < 8_000_000_000L) { val n = s.read(buf); if (n < 0) break; got += n } }
-        disconnect()
-    }
-    val down = mbps(got, System.nanoTime() - t0)
-    val size = 10_000_000
-    val t1 = System.nanoTime()
-    open("https://speed.cloudflare.com/__up").run {
-        requestMethod = "POST"; doOutput = true; setFixedLengthStreamingMode(size)
-        outputStream.use { o -> var left = size; while (left > 0) { val n = minOf(left, buf.size); o.write(buf, 0, n); left -= n } }
-        responseCode; disconnect()
-    }
-    val up = mbps(size.toLong(), System.nanoTime() - t1)
-    return Speed(pings[pings.size / 2], down, up)
+/** fast.com (Netflix) servers nearest to this phone, plus a ping to 1.1.1.1. */
+private fun internetTest(): Speed = io.github.sparkcyf.voicesipagent.voice.FastSpeed.run().let {
+    Speed(it.pingMs, it.downMbps, it.upMbps, it.error, it.server)
 }

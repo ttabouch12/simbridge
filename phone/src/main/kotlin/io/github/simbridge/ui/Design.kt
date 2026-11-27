@@ -1,5 +1,8 @@
 package io.github.simbridge.ui
 
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -129,6 +132,21 @@ fun Group(label: String? = null, rows: List<@Composable () -> Unit>) {
 
 /** One row: tinted icon, title, optional summary, optional trailing content (or a chevron when it opens a page). */
 @OptIn(ExperimentalFoundationApi::class)
+/** Material motion: emphasized easing curves (M3 motion tokens). */
+object Motion {
+    val emphasizedDecelerate = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+    val emphasizedAccelerate = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
+    val pressSpring = androidx.compose.animation.core.spring<Float>(dampingRatio = 0.6f, stiffness = 800f)
+}
+
+/** Shrinks a little while pressed and springs back: quick tactile feedback on rows and tiles. */
+@Composable
+fun Modifier.pressScale(src: androidx.compose.foundation.interaction.MutableInteractionSource, to: Float = 0.97f): Modifier {
+    val pressed by src.collectIsPressedAsState()
+    val scale by androidx.compose.animation.core.animateFloatAsState(if (pressed) to else 1f, Motion.pressSpring, label = "press")
+    return graphicsLayer { scaleX = scale; scaleY = scale }
+}
+
 @Composable
 fun GroupRow(
     icon: ImageVector?,
@@ -141,9 +159,10 @@ fun GroupRow(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val alpha = if (enabled) 1f else 0.45f
+    val src = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 64.dp)
-            .let { if (onClick != null && enabled) it.combinedClickable(onClick = onClick) else it }
+        Modifier.fillMaxWidth().heightIn(min = 64.dp).pressScale(src, 0.98f)
+            .let { if (onClick != null && enabled) it.combinedClickable(src, androidx.compose.material3.ripple(), onClick = onClick) else it }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -187,9 +206,14 @@ fun Tile(
             else -> MaterialTheme.colorScheme.surfaceContainerHigh
         }, label = "tile")
     val fg = if (on && enabled) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+    // Expressive press: the tile squares its corners and shrinks a touch, then springs back.
+    val src = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by src.collectIsPressedAsState()
+    val corner by androidx.compose.animation.core.animateDpAsState(if (pressed) 12.dp else if (on) 28.dp else 24.dp,
+        androidx.compose.animation.core.spring(dampingRatio = 0.6f, stiffness = 800f), label = "corner")
     Row(
-        modifier.heightIn(min = 72.dp).clip(RoundedCornerShape(24.dp)).background(bg)
-            .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
+        modifier.heightIn(min = 72.dp).pressScale(src, 0.96f).clip(RoundedCornerShape(corner)).background(bg)
+            .combinedClickable(src, androidx.compose.material3.ripple(), enabled = enabled, onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

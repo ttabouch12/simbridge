@@ -24,7 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
+import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -61,6 +61,7 @@ private fun tabOf(s: Screen): Int = when (s) {
     is Screen.Tool -> if (s.tool == Tool.CALLS) Tabs.CALLS else Tabs.SIM
     is Screen.Settings, Screen.Recordings -> Tabs.SETTINGS
     Screen.Remote -> Tabs.SIM
+    is Screen.Dialer -> Tabs.CALLS
 }
 
 /**
@@ -98,7 +99,7 @@ fun WideHome(core: LinkCore, s: Screen, go: (Screen) -> Unit) {
         if (twoPane || s is Screen.Home) Box(if (twoPane) Modifier.width(listWidth).fillMaxHeight() else Modifier.weight(1f).fillMaxHeight()) {
             when (tab) {
                 Tabs.MESSAGES -> ConversationsScreen(core, { k, a -> go(Screen.Chat(k, a)) }, { go(Screen.NewChat) }) { go(Screen.Settings(2)) }
-                Tabs.CALLS -> CallsScreen(core, { go(Screen.Tool(it)) }, { go(Screen.Settings(it)) }, { go(Screen.Blocked) }) { k, a -> go(Screen.Chat(k, a)) }
+                Tabs.CALLS -> CallsScreen(core, { go(Screen.Tool(it)) }, { go(Screen.Settings(it)) }, { go(Screen.Blocked) }, { k, a -> go(Screen.Chat(k, a)) }) { go(Screen.Dialer(it)) }
                 Tabs.SIM -> SimPhoneScreen(core, null, { t -> t?.let { go(Screen.Tool(it)) } }) { go(Screen.Remote) }
                 else -> SettingsScreen(core, null, { sec -> sec?.let { go(Screen.Settings(it)) } })
             }
@@ -114,7 +115,12 @@ fun WideHome(core: LinkCore, s: Screen, go: (Screen) -> Unit) {
                 Tabs.SETTINGS -> Screen.Settings(0)
                 else -> s
             } else s
-            key(detail) {
+            androidx.compose.animation.AnimatedContent(detail, transitionSpec = {
+                // Fade through between details, like Material list-detail.
+                (androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(210, 90)) +
+                    androidx.compose.animation.scaleIn(androidx.compose.animation.core.tween(210, 90, io.github.simbridge.ui.Motion.emphasizedDecelerate), 0.96f)) togetherWith
+                    androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(90))
+            }, label = "detail") { detail ->
                 when (detail) {
                     is Screen.Chat -> ChatScreen(core, detail.key, detail.address, detail.draft, back)
                     Screen.NewChat -> NewChatScreen(core, back) { k, a -> go(Screen.Chat(k, a)) }

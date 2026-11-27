@@ -239,7 +239,7 @@
     <string name="speed_link">Entre los teléfonos</string>
     <string name="speed_link_sub">Ping y velocidad por el punto de acceso o el Wi-Fi compartido. No usa datos móviles.</string>
     <string name="speed_internet">Internet</string>
-    <string name="speed_internet_sub">Desde este teléfono por los datos móviles del teléfono SIM. Usa unos 35 MB.</string>
+    <string name="speed_internet_sub">Desde este teléfono por los datos móviles del teléfono SIM, a los servidores fast.com de Netflix. Puede usar de 50 a 200 MB.</string>
     <string name="speed_run">Iniciar prueba</string>
     <string name="speed_ping">Ping</string>
     <string name="speed_down">Descarga</string>
@@ -471,8 +471,16 @@
     <string name="pane_chat">Elige una conversación o empieza una nueva</string>
     <string name="call_alert_title">Cómo suenan las llamadas en este dispositivo</string>
     <string name="call_alert_sub">Para tabletas y dispositivos sin app de Teléfono.</string>
-    <string name="call_alert_full">Pantalla completa</string>
-    <string name="call_alert_full_sub">Se abre la pantalla de llamada, incluso sobre la pantalla de bloqueo.</string>
+    <string name="call_alert_full">Pantalla completa si está bloqueado</string>
+    <string name="call_alert_full_sub">Bloqueado: se abre la pantalla de llamada. En uso: un aviso emergente con Responder y Rechazar, como WhatsApp.</string>
     <string name="call_alert_notif">Solo notificación</string>
     <string name="call_alert_notif_sub">Una notificación con Responder y Rechazar, como en WhatsApp.</string>
+    <string name="close">Cerrar</string>
+    <string name="dial_ussd_wait">Consultando al teléfono SIM…</string>
+    <string name="call_back_to">Volver a la llamada</string>
+    <string name="dash_full">Carga completa</string>
+    <string name="dash_internet_ms">Internet · %1$d ms</string>
+    <string name="dash_no_internet">Sin internet</string>
+    <string name="speed_server">Servidores: %1$s (fast.com de Netflix)</string>
+    <string name="remote_paste">Pegar en el teléfono SIM</string>
 </resources>

@@ -46,7 +46,8 @@ import kotlinx.coroutines.withContext
  * call features. Dialing opens the phone app with SimBridge's calling account.
  */
 @Composable
-fun CallsScreen(core: LinkCore, onTool: (Tool) -> Unit, onSettings: (Int) -> Unit, onBlocked: () -> Unit, onChat: (String, String) -> Unit) {
+fun CallsScreen(core: LinkCore, onTool: (Tool) -> Unit, onSettings: (Int) -> Unit, onBlocked: () -> Unit, onChat: (String, String) -> Unit,
+                onDial: (String) -> Unit = {}) {
     val ctx = LocalContext.current
     val version by core.store.version.collectAsState()
     val st by core.control.status.collectAsState()
@@ -59,12 +60,11 @@ fun CallsScreen(core: LinkCore, onTool: (Tool) -> Unit, onSettings: (Int) -> Uni
         }
     }
     val own = remember { io.github.simbridge.Telecom.selfManaged(ctx) }
-    var dialing by remember { mutableStateOf(false) }
     fun dial(number: String) {
         if (own) io.github.simbridge.Telecom.call(ctx, number)
         else runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", number, null))) }
     }
-    if (dialing) DialDialog(onCall = { dial(it) }, onDismiss = { dialing = false })
+
 
     Box(Modifier.fillMaxSize()) {
         PageScaffold(stringResource(R.string.tab_calls), onBack = null) {
@@ -107,7 +107,7 @@ fun CallsScreen(core: LinkCore, onTool: (Tool) -> Unit, onSettings: (Int) -> Uni
             VSpace(80.dp)
         }
         ExtendedFloatingActionButton(
-            onClick = { if (own) dialing = true else runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL)) } },
+            onClick = { if (own) onDial("") else runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL)) } },
             icon = { Icon(Icons.Filled.Dialpad, null) }, text = { Text(stringResource(R.string.calls_dial)) },
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
         )

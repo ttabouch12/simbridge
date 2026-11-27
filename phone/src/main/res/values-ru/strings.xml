@@ -239,7 +239,7 @@
     <string name="speed_link">Между телефонами</string>
     <string name="speed_link_sub">Пинг и скорость через точку доступа или общий Wi-Fi. Мобильные данные не тратятся.</string>
     <string name="speed_internet">Интернет</string>
-    <string name="speed_internet_sub">С этого телефона через мобильные данные SIM-телефона. Около 35 МБ.</string>
+    <string name="speed_internet_sub">С этого телефона через мобильные данные SIM-телефона до серверов fast.com от Netflix. Может использовать 50–200 МБ.</string>
     <string name="speed_run">Запустить тест</string>
     <string name="speed_ping">Пинг</string>
     <string name="speed_down">Загрузка</string>
@@ -471,8 +471,16 @@
     <string name="pane_chat">Выберите разговор или начните новый</string>
     <string name="call_alert_title">Как звонки отображаются на этом устройстве</string>
     <string name="call_alert_sub">Для планшетов и устройств без приложения «Телефон».</string>
-    <string name="call_alert_full">Во весь экран</string>
-    <string name="call_alert_full_sub">Открывается экран звонка, даже поверх экрана блокировки.</string>
+    <string name="call_alert_full">Во весь экран при блокировке</string>
+    <string name="call_alert_full_sub">Заблокирован: открывается экран звонка. Используется: всплывающее уведомление с кнопками, как в WhatsApp.</string>
     <string name="call_alert_notif">Только уведомление</string>
     <string name="call_alert_notif_sub">Уведомление с кнопками «Ответить» и «Отклонить», как в WhatsApp.</string>
+    <string name="close">Закрыть</string>
+    <string name="dial_ussd_wait">Запрос к SIM-телефону…</string>
+    <string name="call_back_to">Вернуться к звонку</string>
+    <string name="dash_full">Полностью заряжен</string>
+    <string name="dash_internet_ms">Интернет · %1$d мс</string>
+    <string name="dash_no_internet">Нет интернета</string>
+    <string name="speed_server">Серверы: %1$s (fast.com от Netflix)</string>
+    <string name="remote_paste">Вставить на SIM-телефоне</string>
 </resources>

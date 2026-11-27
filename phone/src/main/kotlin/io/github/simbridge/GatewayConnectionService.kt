@@ -135,8 +135,11 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
         core.notifier.incomingCall(ActiveCall.ui.value?.who ?: label)
         // Without the full-screen permission Android only shows a small notification: open the
         // call screen directly (works while SimBridge is on screen).
-        if (core.prefs.fullScreenCalls &&
-            !core.context.getSystemService(android.app.NotificationManager::class.java).canUseFullScreenIntent()) CallActivity.open(core.context)
+        // Like WhatsApp: locked or screen off -> the full call screen; in use -> a pop-up notification.
+        val ctx = core.context
+        val locked = ctx.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked ||
+            !ctx.getSystemService(android.os.PowerManager::class.java).isInteractive
+        if (core.prefs.fullScreenCalls && locked) CallActivity.open(ctx)
     }
 
     fun answerFromScreen() { if (leg.state != LegState.CONNECTED) onAnswer() }
