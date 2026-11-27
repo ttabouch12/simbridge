@@ -12,6 +12,17 @@ Update both apps. Pairing is kept.
 - **Read on one, quiet on all:** with several main phones paired, opening or marking a chat read on
   one phone marks it read on the others and clears their notification. Needs the 2.9 SimBridge
   Gateway on the SIM phone.
+- **Big-screen layout:** on tablets, foldables and landscape phones a side rail replaces the
+  bottom bar. From 840 dp wide every place is list + detail side by side: conversations and the
+  open chat, the SIM phone's controls and the selected tool, calls and voicemail, settings
+  sections and the open section.
+- **Full screen or notification only:** on tablets, choose how calls ring (Settings > Calls).
+  *Check everything* asks for the full-screen permission when it's needed.
+- **Every contact:** main phones also get the SIM phone's contacts (all its accounts and the SIM
+  card) for names and the new-message picker, on top of their own Google contacts.
+- Wi-Fi details work on newer Android without location access.
+- Test call for developers: `adb shell am broadcast -n io.github.simbridge.gateway/io.github.sparkcyf.voicesipagent.app.AdbControlReceiver --es op test-call`
+  rings every main phone and echoes your voice back.
 - Up to 4 phones and tablets can be paired at once (scan the same pairing code on each); calls
   ring on all of them and texts reach all of them.
 
