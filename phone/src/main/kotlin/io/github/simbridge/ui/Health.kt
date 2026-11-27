@@ -113,7 +113,10 @@ fun DiagnosticsPage(core: LinkCore, s: GatewayStatus?, online: Boolean, onTool: 
             Check(mine != null && !mine.weak, ctx.getString(R.string.chk_wifi),
                 mine?.let { linkText(it) + if (it.weak) "\n" + ctx.getString(R.string.health_weak_sub) else "" } ?: ctx.getString(R.string.health_no_wifi)),
             if (mine?.stuckAx == true) Check(false, ctx.getString(R.string.chk_wifi6), ctx.getString(R.string.chk_wifi6_fix)) else null,
-            Check(Telecom.isEnabled(ctx), ctx.getString(R.string.chk_account), ctx.getString(R.string.chk_account_fix),
+            if (Telecom.selfManaged(ctx) && core.prefs.fullScreenCalls) Check(ctx.getSystemService(android.app.NotificationManager::class.java).canUseFullScreenIntent(),
+                ctx.getString(R.string.chk_fsi), ctx.getString(R.string.chk_fsi_fix),
+                open(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, android.net.Uri.parse("package:" + ctx.packageName))), ctx.getString(R.string.chk_allow))
+            else             Check(Telecom.isEnabled(ctx), ctx.getString(R.string.chk_account), ctx.getString(R.string.chk_account_fix),
                 open(Intent(android.telecom.TelecomManager.ACTION_CHANGE_PHONE_ACCOUNTS)), ctx.getString(R.string.chk_open)),
             Check(ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName), ctx.getString(R.string.chk_battery),
                 ctx.getString(R.string.chk_battery_fix),
@@ -121,7 +124,7 @@ fun DiagnosticsPage(core: LinkCore, s: GatewayStatus?, online: Boolean, onTool: 
             Check(perm(android.Manifest.permission.RECORD_AUDIO) && perm(android.Manifest.permission.POST_NOTIFICATIONS), ctx.getString(R.string.chk_perms),
                 ctx.getString(R.string.chk_perms_fix),
                 open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + ctx.packageName))), ctx.getString(R.string.chk_open)),
-            Check(isDefaultSmsApp(ctx).takeIf { it }, ctx.getString(R.string.chk_sms), ctx.getString(R.string.chk_sms_fix), fixText = true),
+            if (!io.github.simbridge.smsRoleAvailable(ctx)) null else Check(isDefaultSmsApp(ctx).takeIf { it }, ctx.getString(R.string.chk_sms), ctx.getString(R.string.chk_sms_fix), fixText = true),
             if (s == null) Check(false, ctx.getString(R.string.chk_sim_phone), ctx.getString(R.string.dash_waiting)) else null,
             s?.let { st ->
                 val low = (st.battery ?: 100) < 20 && !st.charging

@@ -494,10 +494,19 @@ private fun Hero(s: GatewayStatus?, online: Boolean, detail: String) {
                 Muted(stringResource(if (s?.charging == true) R.string.dash_charging else R.string.dash_battery))
                 // Time left from the SIM phone's real drain (or to a full charge).
                 val mins = if (s?.charging == true) s.chargeMin else s?.batteryMin
-                if (mins != null) Muted(stringResource(if (s?.charging == true) R.string.dash_full_in else R.string.dash_time_left, duration(mins)))
+                if (s?.charging == true && (mins == 0 || s.battery == 100)) Muted(stringResource(R.string.dash_full))
+                else if (mins != null) Muted(stringResource(if (s?.charging == true) R.string.dash_full_in else R.string.dash_time_left, duration(mins)))
                 Spacer(Modifier.height(10.dp))
-                StatusPill(if (online) stringResource(R.string.dash_connected) else detail.ifBlank { stringResource(R.string.dash_offline) },
-                    if (online) Status.ok() else Status.bad())
+                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    StatusPill(if (online) stringResource(R.string.dash_connected) else detail.ifBlank { stringResource(R.string.dash_offline) },
+                        if (online) Status.ok() else Status.bad())
+                    // The SIM phone's own internet, from a ping to 1.1.1.1 / Google.
+                    val ping = s?.pingMs
+                    if (online && ping != null) StatusPill(
+                        if (ping >= 0) stringResource(R.string.dash_internet_ms, ping) else stringResource(R.string.dash_no_internet),
+                        if (ping < 0) Status.bad() else if (ping > 150) Status.warn() else Status.ok())
+                }
                 if (s != null) { Spacer(Modifier.height(6.dp)); Muted(stringResource(R.string.dash_uptime, uptime(s.uptimeMin))) }
             }
         }

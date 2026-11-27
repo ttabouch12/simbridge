@@ -1,5 +1,53 @@
 # Changelog
 
+## SimBridge 2.9.0
+
+Update both apps. Pairing is kept.
+
+- **Tablets as main phones (Android 14+):** on a tablet or any device without Google's Phone
+  app, SimBridge now rings with its own full-screen call screen (answer, decline, mute, speaker,
+  keypad, translation) and has its own dial pad in the Calls tab. Texts work without being the
+  default texting app; the settings that need one are hidden there. The app no longer asks the
+  store for phone hardware.
+- **Read on one, quiet on all:** with several main phones paired, opening or marking a chat read on
+  one phone marks it read on the others and clears their notification. Needs the 2.9 SimBridge
+  Gateway on the SIM phone.
+- **Big-screen layout:** on tablets, foldables and landscape phones a side rail replaces the
+  bottom bar. From 840 dp wide every place is list + detail side by side: conversations and the
+  open chat, the SIM phone's controls and the selected tool, calls and voicemail, settings
+  sections and the open section.
+- **Full screen or notification only:** on tablets, choose how calls ring (Settings > Calls).
+  *Check everything* asks for the full-screen permission when it's needed.
+- **Every contact:** main phones also get the SIM phone's contacts (all its accounts and the SIM
+  card) for names and the new-message picker, on top of their own Google contacts.
+- **Dialer like Google's Phone app** (tablets): a full keypad page with letters on the keys,
+  matching contacts as you type, a big green call button and SIM choice on dual-SIM phones.
+  **USSD codes** (`*123#`) typed there run on the SIM phone and their reply (and menus) show on the
+  same page.
+- **Calls ring like WhatsApp** on tablets: full screen when the tablet is locked, a pop-up with
+  Answer and Decline while you use it (or notification only, if you choose). Answering from the
+  pop-up opens the call screen; bigger buttons on the call and translation screens.
+- **Internet status:** next to *Connected*, the SIM phone tab shows whether the SIM phone has
+  internet and its ping to 1.1.1.1 (or Google).
+- **Speed test with fast.com:** both the main phone's and the SIM phone's internet tests now use
+  Netflix's fast.com servers (parallel streams, like the site) and show where the servers are;
+  latency is a real ping to 1.1.1.1.
+- **Battery estimate from the battery's meters:** time left and time to full come from the SIM
+  phone's charge counter and average current, so they show at once, follow real use and survive
+  app restarts. "Fully charged" at 100 %.
+- **Remote screen:** the SIM phone stays upright while controlled (touch didn't line up in
+  landscape) and the clipboard is shared both ways; the paste button types the main phone's
+  clipboard on the SIM phone.
+- **Motion:** rows and tiles spring when pressed, tiles square their corners as you touch them,
+  pages use Material shared-axis and fade-through transitions.
+- Fixes: the internet check no longer holds up USSD or texts; tablets drop calling accounts left
+  by older versions; the call screen stays open while an outgoing call starts.
+- Wi-Fi details work on newer Android without location access.
+- Test call for developers: `adb shell am broadcast -n io.github.simbridge.gateway/io.github.sparkcyf.voicesipagent.app.AdbControlReceiver --es op test-call`
+  rings every main phone and echoes your voice back.
+- Up to 4 phones and tablets can be paired at once (scan the same pairing code on each); calls
+  ring on all of them and texts reach all of them.
+
 ## SimBridge 2.8.0
 
 Update both apps. Pairing is kept. This release includes the 2.7 redesign, which was not released on its own.

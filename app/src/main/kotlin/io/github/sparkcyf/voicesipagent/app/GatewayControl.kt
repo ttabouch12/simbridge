@@ -99,6 +99,8 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
             }
             "report" -> prefs.edit().putBoolean("daily_report", o.optBoolean("on", true)).apply()
             "status" -> send(status(), from)
+            // A main phone read a conversation: tell every main phone, so the others drop its notification.
+            "read" -> send(JSONObject().put("op", "read").put("key", o.optString("key").take(200)))
             "ussd" -> ussd(o.optString("code"), o.optInt("sim", 0).takeIf { it > 0 }, from)
             "ussd-reply" -> rt.worker { ussdReply("", privilegedRaw("ussd-reply", o.optString("text").take(40)), from) }
             "ussd-cancel" -> rt.worker { privilegedRaw("ussd-cancel", "") }
@@ -126,6 +128,14 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
             "locate" -> locate(from)
             "voicemail" -> { prefs.edit().putInt("no_answer_sec", o.optInt("seconds").coerceIn(0, 120)).apply(); send(status(), from) }
             "contacts" -> ContactNames.importFromPhone(app, o.optJSONArray("list"))
+            "contacts-get" -> rt.worker {
+                val all = ContactNames.everyNumber(app)
+                val parts = all.chunked(300).ifEmpty { listOf(emptyList()) }
+                parts.forEachIndexed { i, part ->
+                    send(JSONObject().put("op", "contacts-list").put("part", i).put("of", parts.size)
+                        .put("list", JSONArray(part.map { (name, n) -> JSONObject().put("name", name).put("n", n) })), from)
+                }
+            }
             "data-detail" -> send(dataDetail(), from)
             "screen-start" -> screenStart(o.optInt("w", 1080), o.optInt("bitrate", 6_000_000), o.optInt("flags", 1), from)
             "screen-stop" -> privilegedRaw("screen-stop", "")
@@ -273,10 +283,13 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
         val o = JSONObject().put("op", "status").put("at", System.currentTimeMillis())
         BatteryInfo.read(app)?.let { b ->
             o.put("battery", b.percent).put("charging", b.charging)
-            if (b.charging) runCatching { app.getSystemService(android.os.BatteryManager::class.java).computeChargeTimeRemaining() }
-                .getOrNull()?.takeIf { it > 0 }?.let { o.put("chargeMin", (it / 60_000).toInt()) }
-            else BatteryEstimate.minutesLeft(android.os.SystemClock.elapsedRealtime())?.let { o.put("batteryMin", it) }
+            BatteryMeter.sample(app, b.charging)
+            if (b.charging) BatteryMeter.minutesToFull(app, b.percent)?.let { o.put("chargeMin", it) }
+            else (BatteryMeter.minutesLeft(app) ?: BatteryEstimate.minutesLeft(android.os.SystemClock.elapsedRealtime()))?.let { o.put("batteryMin", it) }
         }
+        pingMs?.let { o.put("pingMs", it) }
+        // Own thread: a ping can take seconds with no internet and must not hold up USSD or texts.
+        if (System.currentTimeMillis() - pingAt > 20_000) netCheck.execute { if (checkInternet() != null) send(status()) }
         o.put("powerSaver", rt.companionPower.value).put("quiet", rt.quietFlags.value)
         o.put("uptimeMin", SystemClock.elapsedRealtime() / 60_000)
         o.put("version", runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull() ?: "")
@@ -600,21 +613,42 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
             .put("tx", i.txLinkSpeedMbps).put("rx", i.rxLinkSpeedMbps)
     }.getOrNull()
 
-    private fun ownDownloadMbps(): Double = runCatching {
-        val c = java.net.URL("https://speed.cloudflare.com/__down?bytes=25000000").openConnection() as java.net.HttpURLConnection
-        c.connectTimeout = 8000; c.readTimeout = 15_000
-        val buf = ByteArray(64 * 1024); var got = 0L
-        val t0 = System.nanoTime()
-        c.inputStream.use { s -> while (System.nanoTime() - t0 < 8_000_000_000L) { val n = s.read(buf); if (n < 0) break; got += n } }
-        c.disconnect()
-        got * 8.0 / ((System.nanoTime() - t0) / 1e9) / 1e6
-    }.getOrDefault(0.0)
+    /** This phone's own download speed to the nearest fast.com (Netflix) servers. */
+    private fun ownDownloadMbps(): Double =
+        io.github.sparkcyf.voicesipagent.voice.FastSpeed.run(upload = false, seconds = 6).downMbps ?: 0.0
 
     private var noClientsSince = 0L
     private var nightApplied = false
 
+    /** Internet on the SIM phone: the last ping to 1.1.1.1 (or Google), in ms; -1 = no internet; null = not checked. */
+    @Volatile var pingMs: Int? = null
+    @Volatile private var pingAt = 0L
+    private val netCheck = java.util.concurrent.ThreadPoolExecutor(0, 1, 30, java.util.concurrent.TimeUnit.SECONDS,
+        java.util.concurrent.ArrayBlockingQueue(1), java.util.concurrent.ThreadPoolExecutor.DiscardPolicy())
+
+    /** Pings 1.1.1.1, then 8.8.8.8, then tries a TCP connection to Google, at most every 20 s. */
+    @Synchronized fun checkInternet(): Int? {
+        if (System.currentTimeMillis() - pingAt < 20_000) return pingMs
+        pingAt = System.currentTimeMillis()
+        fun ping(host: String): Int? = runCatching {
+            val p = ProcessBuilder("ping", "-c", "1", "-W", "2", host).redirectErrorStream(true).start()
+            val out = p.inputStream.bufferedReader().readText()
+            p.waitFor()
+            Regex("time=([0-9.]+)").find(out)?.groupValues?.get(1)?.toDouble()?.toInt()?.coerceAtLeast(1)
+        }.getOrNull()
+        fun tcp(host: String): Int? = runCatching {
+            val t = System.nanoTime()
+            java.net.Socket().use { it.connect(java.net.InetSocketAddress(host, 443), 3000) }
+            ((System.nanoTime() - t) / 1_000_000).toInt().coerceAtLeast(1)
+        }.getOrNull()
+        pingMs = ping("1.1.1.1") ?: ping("8.8.8.8") ?: tcp("www.google.com") ?: -1
+        return pingMs
+    }
+
     /** Every minute: hotspot only when needed, night mode, the monthly data limit. */
     private fun housekeeping() {
+        BatteryInfo.read(app)?.let { BatteryMeter.sample(app, it.charging) }
+        checkInternet()
         // Smart hotspot: off when the main phones reach us some other way and nobody uses it.
         if (prefs.getBoolean("smart_hotspot", false) && hotspotOn()) {
             val phones = rt.sipAgent?.phoneAddresses.orEmpty()

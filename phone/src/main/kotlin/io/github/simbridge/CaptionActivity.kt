@@ -1,5 +1,7 @@
 package io.github.simbridge
 
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.foundation.layout.height
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -40,8 +42,11 @@ class CaptionActivity : ComponentActivity() {
         setContent {
             LinkTheme {
                 Scaffold { pad ->
-                    Column(Modifier.fillMaxSize().padding(pad).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ModeChips()
+                    Column(Modifier.fillMaxSize().padding(pad).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ModeChips(large = true)
+                        // Tablets: a big way back to the call screen (mute, speaker, hang up).
+                        if (ActiveCall.shown != null) androidx.compose.material3.FilledTonalButton({ CallActivity.open(this@CaptionActivity) },
+                            Modifier.fillMaxWidth().height(56.dp)) { Text(stringResource(R.string.call_back_to), style = MaterialTheme.typography.titleMedium) }
                         if (ActiveCall.current == null) Text(stringResource(R.string.tr_no_call), style = MaterialTheme.typography.bodyMedium)
                         CaptionList(Modifier.weight(1f), large = prefs.captionLarge)
                     }
@@ -53,11 +58,24 @@ class CaptionActivity : ComponentActivity() {
 
 /** Off / Captions / Captions + voice for the call in progress. */
 @Composable
-internal fun ModeChips() {
+internal fun ModeChips(large: Boolean = false) {
     val call = ActiveCall.current
+    val modes = listOf(TranslateMode.OFF to R.string.tr_off, TranslateMode.CAPTIONS to R.string.tr_captions, TranslateMode.VOICE to R.string.tr_voice)
+    if (large) {
+        // Full page: one big segmented control, easy to hit during a call.
+        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            modes.forEachIndexed { i, (m, label) ->
+                SegmentedButton(
+                    selected = Captions.mode == m, onClick = { call?.translator?.mode = m }, enabled = call != null,
+                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, modes.size),
+                    modifier = Modifier.height(56.dp),
+                ) { Text(stringResource(label), style = MaterialTheme.typography.titleMedium) }
+            }
+        }
+        return
+    }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf(TranslateMode.OFF to R.string.tr_off, TranslateMode.CAPTIONS to R.string.tr_captions,
-            TranslateMode.VOICE to R.string.tr_voice).forEach { (m, label) ->
+        modes.forEach { (m, label) ->
             FilterChip(Captions.mode == m, { call?.translator?.mode = m }, { Text(stringResource(label)) }, enabled = call != null)
         }
     }

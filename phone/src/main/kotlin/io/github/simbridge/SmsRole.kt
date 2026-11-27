@@ -8,6 +8,11 @@ import android.os.IBinder
 import android.provider.Telephony
 
 /** Whether SimBridge is the phone's default SMS app (then it owns the system message store). */
+/** False on tablets without texting: there is no default texting app to be, and no system inbox to mirror to. */
+fun smsRoleAvailable(context: Context): Boolean = runCatching {
+    context.getSystemService(android.app.role.RoleManager::class.java).isRoleAvailable(android.app.role.RoleManager.ROLE_SMS)
+}.getOrDefault(false)
+
 fun isDefaultSmsApp(context: Context): Boolean =
     runCatching { Telephony.Sms.getDefaultSmsPackage(context) == context.packageName }.getOrDefault(false)
 

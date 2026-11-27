@@ -266,7 +266,7 @@ class LinkCore(val context: Context) {
         }
         // Ring on that SIM's account when it's enabled, otherwise on the plain SimBridge account.
         val simHandle = Telecom.handle(context, leg.remote.sim)
-        val target = if (leg.remote.sim != null && Telecom.isEnabled(context, simHandle)) simHandle else Telecom.handle(context)
+        val target = if (leg.remote.sim != null && !Telecom.selfManaged(context) && Telecom.isEnabled(context, simHandle)) simHandle else Telecom.handle(context)
         runCatching { tm.addNewIncomingCall(target, extras) }.onFailure {
             Log.w("telecom: can't ring (is the SIM phone calling account turned on?)", it)
             legs.remove(leg.id)
@@ -371,9 +371,20 @@ class LinkCore(val context: Context) {
         }
     }
 
-    /** Marks a conversation read here and in the system Messages app. */
-    fun markRead(key: String) {
+    /**
+     * Marks a conversation read here and in the system Messages app. [share]: also tell the other
+     * main phones (through the SIM phone), so their notification for it goes away too.
+     */
+    fun markRead(key: String, share: Boolean = true) {
         SystemSms.markRead(context, store.markRead(key))
+        if (share) control.shareRead(key)
+    }
+
+    /** Another main phone read this conversation: mark it read and clear its notification here. */
+    fun readElsewhere(key: String) {
+        if (key.isBlank()) return
+        markRead(key, share = false)
+        notifier.cancel(key)
     }
 
     /** Sends a text through the SIM phone. Returns the new message id. */

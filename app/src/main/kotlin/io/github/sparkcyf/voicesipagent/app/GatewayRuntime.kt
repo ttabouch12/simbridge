@@ -876,6 +876,36 @@ class GatewayRuntime private constructor(context: Context) {
         updateReadiness()
     }
 
+    /**
+     * Test only (adb): rings every main phone as if [from] called the SIM. Once answered it echoes
+     * the phone's microphone back 0.4 s later, so both audio directions can be checked without
+     * a second SIM. Ends by itself after 60 s.
+     */
+    fun testCall(from: String) = worker.execute {
+        val s = sipAgent ?: run { AppLog.w("test call: SIP not running"); return@execute }
+        val leg = s.dial("phone", io.github.sparkcyf.voicesipagent.voice.Party(from, "SimBridge test call"))
+        AppLog.i("test call ringing the main phones")
+        leg.addListener(object : io.github.sparkcyf.voicesipagent.voice.CallLeg.Listener {
+            override fun onMediaChanged(leg: io.github.sparkcyf.voicesipagent.voice.CallLeg, media: io.github.sparkcyf.voicesipagent.voice.MediaPort?) {
+                if (media == null) return
+                Thread({
+                    val line = ArrayDeque<ShortArray>()
+                    val end = System.currentTimeMillis() + 60_000
+                    var next = System.nanoTime()
+                    while (leg.state != LegState.ENDED && System.currentTimeMillis() < end) {
+                        line.addLast(media.readFrame())
+                        media.writeFrame(if (line.size > 20) line.removeFirst() else media.format.silence())
+                        next += 20_000_000
+                        val wait = (next - System.nanoTime()) / 1_000_000
+                        if (wait > 0) Thread.sleep(wait)
+                    }
+                    if (leg.state != LegState.ENDED) leg.hangup(HangupCause.NORMAL)
+                    AppLog.i("test call ended")
+                }, "test-call").start()
+            }
+        })
+    }
+
     fun restartSip() = worker.execute {
         if (hasActiveWork()) { restartPending = true; _health.update { it.copy(settingsPending = true) }; return@execute }
         startSip()
@@ -961,6 +991,7 @@ class GatewayRuntime private constructor(context: Context) {
                 val pct = level * 100 / scale
                 val plugged = i.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0
                 BatteryEstimate.note(android.os.SystemClock.elapsedRealtime(), pct, plugged)
+                BatteryMeter.sample(c, plugged)
                 val warned = prefs.getInt("battery_warned", 100)
                 when {
                     plugged -> if (warned != 100) prefs.edit().putInt("battery_warned", 100).apply()

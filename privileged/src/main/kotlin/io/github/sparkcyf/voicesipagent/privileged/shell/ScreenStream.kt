@@ -33,6 +33,8 @@ internal object ScreenStream {
     const val FLAG_AUDIO = 2
     private const val VIDEO: Byte = 0
     private const val AUDIO: Byte = 1
+    private const val CLIP: Byte = 2
+    @Volatile private var restoreRotation: Pair<String, String>? = null
 
     /** [arg] = "port keyHex ivDownHex ivUpHex maxWidth bitRate flags". Returns "listening" or throws. */
     fun start(arg: String): String {
@@ -75,11 +77,24 @@ internal object ScreenStream {
             val inp = DataInputStream(java.io.BufferedInputStream(s.getInputStream()))
             down = GcmFrames(key, ivDown)
             val up = GcmFrames(key, ivUp)
+            // Portrait only while controlled (touch in landscape didn't line up), restored afterwards.
+            restoreRotation = Portrait.lock()
+            Thread.sleep(400)
             val (w, h) = screenSize()
             val vw = minOf(o.maxW, w) / 16 * 16
             val vh = (h.toLong() * vw / w).toInt() / 16 * 16
             down.write(out, java.nio.ByteBuffer.allocate(16).putInt(w).putInt(h).putInt(vw).putInt(vh).array())
             Thread({ readInput(inp, up, s) }, "screen-input").apply { isDaemon = true; start() }
+            // Shared clipboard: what's copied here appears on the main phone.
+            Thread({
+                var last = Clip.get()
+                while (!s.isClosed) {
+                    runCatching { Thread.sleep(1000) }
+                    val now = Clip.get()
+                    if (now != null && now != last && now != Clip.lastSet) runCatching { packet(out, CLIP, now.toByteArray()) }
+                    last = now
+                }
+            }, "screen-clip").apply { isDaemon = true; start() }
             // Keep the phone awake while controlled (and its panel dark, if asked).
             Thread({
                 while (!s.isClosed) {
@@ -96,6 +111,8 @@ internal object ScreenStream {
         } finally {
             runCatching { proc?.destroy() }
             if (screenOff) DisplayPower.set(true)
+            restoreRotation?.let { Portrait.restore(it) }
+            restoreRotation = null
         }
     }
 
@@ -205,6 +222,9 @@ internal object ScreenStream {
                         inject(e); e.recycle()
                     }
                     'k', 'l' -> key(a.toInt(), long = c == 'l')
+                    // Clipboard from the main phone: 'c' copies it here, 'v' copies and pastes.
+                    'c' -> Clip.set(a)
+                    'v' -> { Clip.set(a); key(KeyEvent.KEYCODE_PASTE, long = false) }
                     's' -> KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(a.toCharArray())?.forEach { inject(it) }
                 }
             }
@@ -306,5 +326,68 @@ internal class GcmFrames(key: ByteArray, prefix: ByteArray) {
         require(len in 16..(8 shl 20)) { "bad frame" }
         val c = ByteArray(len).also { inp.readFully(it) }
         return gcm(javax.crypto.Cipher.DECRYPT_MODE, got++).doFinal(c)   // throws AEADBadTagException if tampered
+    }
+}
+
+/** Keeps the SIM phone upright while it is controlled, then puts its rotation settings back. */
+internal object Portrait {
+    fun lock(): Pair<String, String> {
+        val auto = ShellEnv.run("settings", "get", "system", "accelerometer_rotation").out.trim()
+        val user = ShellEnv.run("settings", "get", "system", "user_rotation").out.trim()
+        ShellEnv.run("settings", "put", "system", "accelerometer_rotation", "0")
+        ShellEnv.run("settings", "put", "system", "user_rotation", "0")
+        return auto to user
+    }
+
+    fun restore(r: Pair<String, String>) {
+        if (r.second.toIntOrNull() != null) ShellEnv.run("settings", "put", "system", "user_rotation", r.second)
+        if (r.first.toIntOrNull() != null) ShellEnv.run("settings", "put", "system", "accelerometer_rotation", r.first)
+    }
+}
+
+/**
+ * The SIM phone's clipboard, reached as the shell user through the clipboard service (the same
+ * way `cmd clipboard` would). Method signatures differ between Android versions, so arguments are
+ * filled by type.
+ */
+internal object Clip {
+    @Volatile var lastSet: String? = null
+
+    private val service: Any? by lazy {
+        runCatching {
+            val binder = Class.forName("android.os.ServiceManager").getMethod("getService", String::class.java).invoke(null, "clipboard")
+            Class.forName("android.content.IClipboard\$Stub").getMethod("asInterface", android.os.IBinder::class.java).invoke(null, binder)
+        }.getOrNull()
+    }
+
+    private fun args(m: java.lang.reflect.Method, first: Any?): Array<Any?> {
+        var strings = 0
+        return m.parameterTypes.mapIndexed { i, t ->
+            when {
+                i == 0 && first != null -> first
+                t == String::class.java -> if (strings++ == 0) "com.android.shell" else null
+                t == Int::class.javaPrimitiveType -> 0
+                else -> null
+            }
+        }.toTypedArray()
+    }
+
+    private val getter by lazy { service?.javaClass?.methods?.first { it.name == "getPrimaryClip" } }
+    private val setter by lazy { service?.javaClass?.methods?.first { it.name == "setPrimaryClip" } }
+
+    fun get(): String? = runCatching {
+        val svc = service ?: return null
+        val m = getter ?: return null
+        val clip = m.invoke(svc, *args(m, null)) as? android.content.ClipData ?: return null
+        if (clip.itemCount == 0) null else clip.getItemAt(0).text?.toString()
+    }.getOrNull()
+
+    fun set(text: String) {
+        runCatching {
+            val svc = service ?: return
+            val m = setter ?: return
+            lastSet = text
+            m.invoke(svc, *args(m, android.content.ClipData.newPlainText("SimBridge", text)))
+        }.onFailure { android.util.Log.w("VsaScreen", "clipboard: ${it.message}") }
     }
 }

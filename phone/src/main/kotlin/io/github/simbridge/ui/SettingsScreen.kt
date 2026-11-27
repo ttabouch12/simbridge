@@ -1,5 +1,6 @@
 package io.github.simbridge.ui
 
+import androidx.compose.material3.RadioButton
 import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
@@ -216,18 +217,35 @@ fun SettingsScreen(core: LinkCore, section: Int? = null, onSection: (Int?) -> Un
                     }
                     TextButton(onRecordings) { Text(stringResource(R.string.recordings)) }
                 }
+                if (Telecom.selfManaged(ctx)) {
+                    var full by remember { mutableStateOf(core.prefs.fullScreenCalls) }
+                    Card(Icons.Filled.Call, stringResource(R.string.call_alert_title), stringResource(R.string.call_alert_sub), ok = true) {
+                        for ((value, title, sub) in listOf(Triple(true, R.string.call_alert_full, R.string.call_alert_full_sub),
+                                Triple(false, R.string.call_alert_notif, R.string.call_alert_notif_sub))) {
+                            Row(Modifier.fillMaxWidth().clickable { full = value; core.prefs.fullScreenCalls = value }.padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(full == value, { full = value; core.prefs.fullScreenCalls = value })
+                                Column(Modifier.weight(1f)) {
+                                    Text(stringResource(title), style = MaterialTheme.typography.bodyLarge)
+                                    Text(stringResource(sub), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
                 TranslationCard(core)
                 NavRow(Icons.Filled.Warning, stringResource(R.string.blocked_title), stringResource(R.string.blocked_sub), onBlocked)
             }
+            val smsRoleOk = remember { io.github.simbridge.smsRoleAvailable(ctx) }
             if (tab == 2) {
-                Card(Icons.Filled.Sms, stringResource(R.string.set_sms),
+                if (smsRoleOk) Card(Icons.Filled.Sms, stringResource(R.string.set_sms),
                     if (smsDefault) stringResource(R.string.set_sms_on)
                     else stringResource(R.string.set_sms_off),
                     ok = true) {
                     if (!smsDefault) FilledTonalButton({ smsRole.launch(ctx.getSystemService(android.app.role.RoleManager::class.java)
                         .createRequestRoleIntent(android.app.role.RoleManager.ROLE_SMS)) }) { Text(stringResource(R.string.set_sms_make)) }
                 }
-                if (!smsDefault) Card(Icons.Filled.Sms, stringResource(R.string.set_mirror),
+                if (smsRoleOk && !smsDefault) Card(Icons.Filled.Sms, stringResource(R.string.set_mirror),
                     when {
                         !mirrorOn -> stringResource(R.string.set_mirror_off)
                         mirrorOk -> stringResource(R.string.set_mirror_on)

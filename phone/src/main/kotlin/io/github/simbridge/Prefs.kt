@@ -62,6 +62,11 @@ class Prefs(context: Context) {
         set(v) = p.edit().putBoolean("mirror_system", v).apply()
 
     /** Calls: record every call automatically (the record button works either way). */
+    /** Tablets: a call opens the full call screen (true) or only shows a notification, like WhatsApp. */
+    var fullScreenCalls: Boolean
+        get() = p.getBoolean("full_screen_calls", true)
+        set(v) = p.edit().putBoolean("full_screen_calls", v).apply()
+
     var autoRecord: Boolean
         get() = p.getBoolean("auto_record", false)
         set(v) = p.edit().putBoolean("auto_record", v).apply()

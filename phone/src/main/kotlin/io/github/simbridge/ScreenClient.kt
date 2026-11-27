@@ -20,6 +20,8 @@ class ScreenClient(
     private val surface: Surface,
     private val onSize: (realW: Int, realH: Int) -> Unit,
     private val onEnd: (String?) -> Unit,
+    /** Text copied on the SIM phone (shared clipboard). */
+    private val onClip: (String) -> Unit = {},
 ) {
     private val writer = Executors.newSingleThreadExecutor()
     @Volatile private var socket: Socket? = null
@@ -29,7 +31,7 @@ class ScreenClient(
 
     fun start() = Thread({ run() }, "screen-client").apply { isDaemon = true; start() }
 
-    /** One command line: "d x y", "m x y", "u x y", "k CODE", "l CODE", "s text". */
+    /** One command line: "d x y", "m x y", "u x y", "k CODE", "l CODE", "s text", "c clip", "v clip-and-paste". */
     fun send(line: String) {
         if (closed) return
         writer.execute { runCatching { out?.let { o -> up?.write(o, line.replace('\n', ' ').toByteArray()) } } }
@@ -71,6 +73,7 @@ class ScreenClient(
                 val nal = frame.copyOfRange(1, frame.size)
                 val len = nal.size
                 if (frame[0].toInt() == 1) { play(nal); continue }
+                if (frame[0].toInt() == 2) { onClip(String(nal, Charsets.UTF_8)); continue }
                 val type = if (len > 4) nal[4].toInt() and 0x1f else 0
                 val flags = if (type == 7 || type == 8) MediaCodec.BUFFER_FLAG_CODEC_CONFIG else 0
                 val i = c.dequeueInputBuffer(50_000)

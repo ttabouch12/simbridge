@@ -26,6 +26,8 @@ data class GatewayStatus(
     /** Minutes until empty (from real drain) or until full; null while not known yet. */
     val batteryMin: Int? = null,
     val chargeMin: Int? = null,
+    /** The SIM phone's last ping to the internet in ms; -1 = no internet; null = unknown. */
+    val pingMs: Int? = null,
     /** Samsung battery protection: "off", or the percent charging stops at. Null when unknown. */
     val chargeLimit: String? = null,
     val dailyReport: Boolean = true,
@@ -71,6 +73,7 @@ data class GatewayStatus(
             charging = o.optBoolean("charging"),
             batteryMin = if (o.has("batteryMin")) o.optInt("batteryMin") else null,
             chargeMin = if (o.has("chargeMin")) o.optInt("chargeMin") else null,
+            pingMs = if (o.has("pingMs")) o.optInt("pingMs") else null,
             chargeLimit = o.optString("chargeLimit").ifBlank { null },
             dailyReport = o.optBoolean("dailyReport", true),
             vmOn = o.optBoolean("vmOn"),
@@ -143,6 +146,7 @@ class PhoneControl(private val core: LinkCore) {
         when (o.optString("op")) {
             "status" -> _status.value = GatewayStatus.parse(o).also {
                 settle(it)
+                if (!contactsAsked) { contactsAsked = true; send(JSONObject().put("op", "contacts-get")) }
                 Telecom.syncSims(ctx, it.sims)
                 Log.i("SIM phone: battery ${it.battery}% data=${it.dataOn} hotspot=${it.hotspot} saver=${it.powerSaver} " +
                     it.sims.joinToString { s -> "SIM${s.slot} ${s.network} level ${s.level}" })
@@ -157,6 +161,12 @@ class PhoneControl(private val core: LinkCore) {
             "sms-status" -> smsStatus(o.optString("ref"), o.optString("status"))
             "missed", "blocked" -> callEvent(o)
             "mms" -> core.onIncomingMms(o)
+            "read" -> core.readElsewhere(o.optString("key"))
+            "contacts-list" -> {
+                if (o.optInt("part") == 0) contactParts = JSONArray()
+                o.optJSONArray("list")?.let { a -> for (i in 0 until a.length()) contactParts.put(a.get(i)) }
+                if (o.optInt("part") >= o.optInt("of", 1) - 1) core.contacts.setSimPhoneContacts(contactParts)
+            }
             "data-detail" -> _dataDetail.value = DataDetail.parse(o)
             "screen-ready" -> _screen.value = ScreenOffer.parse(o)
             "voicemail-msg" -> Voicemails.onMessage(core.context, core, o)
@@ -188,6 +198,13 @@ class PhoneControl(private val core: LinkCore) {
     }
 
     fun refresh() = send(JSONObject().put("op", "status"))
+
+    /** The SIM phone's contacts are fetched once per app start, in parts. */
+    @Volatile private var contactsAsked = false
+    private var contactParts = JSONArray()
+
+    /** Tells the other main phones this conversation was read here. */
+    fun shareRead(key: String) = send(JSONObject().put("op", "read").put("key", key))
 
     /** Answers a USSD menu (the reply goes into the SIM phone's USSD dialog). */
     fun ussdReply(text: String): Boolean { _ussd.value = null; return send(JSONObject().put("op", "ussd-reply").put("text", text)) }
@@ -452,8 +469,14 @@ data class WifiLink(val ssid: String, val freq: Int, val rssi: Int, val tx: Int,
     companion object {
         /** This phone's own Wi-Fi link, or null when not on Wi-Fi. */
         fun local(ctx: android.content.Context): WifiLink? = runCatching {
-            @Suppress("DEPRECATION") val i = ctx.applicationContext.getSystemService(android.net.wifi.WifiManager::class.java).connectionInfo
-            if (i == null || i.networkId == -1) null
+            // The active network's Wi-Fi details; the old connectionInfo is hidden on newer Android without location.
+            val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
+            val fromNet = cm.allNetworks.firstNotNullOfOrNull { n ->
+                cm.getNetworkCapabilities(n)?.takeIf { it.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) }
+                    ?.transportInfo as? android.net.wifi.WifiInfo
+            }
+            @Suppress("DEPRECATION") val i = fromNet ?: ctx.applicationContext.getSystemService(android.net.wifi.WifiManager::class.java).connectionInfo
+            if (i == null || (i.networkId == -1 && i.frequency <= 0)) null
             else WifiLink(i.ssid.trim('"'), i.frequency, i.rssi, i.txLinkSpeedMbps, i.rxLinkSpeedMbps, i.wifiStandard)
         }.getOrNull()
 

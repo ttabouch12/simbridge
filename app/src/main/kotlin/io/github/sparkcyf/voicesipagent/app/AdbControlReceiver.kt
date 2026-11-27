@@ -61,6 +61,7 @@ class AdbControlReceiver : BroadcastReceiver() {
                 val pw = rt.settings.registrarPassword.ifEmpty { rt.resetPairing() }
                 resultData = rt.pairing.pairingUri(pw)
             }
+            "test-call" -> rt.testCall(intent.getStringExtra("from") ?: "+905550000002")
             "legacy-udp" -> rt.setLegacyUdp(intent.getBooleanExtra("on", false))
             "reg-password" -> rt.setRegistrarPassword(intent.getStringExtra("password") ?: "")
             "alert-test" -> rt.alerts.post(intent.getStringExtra("text") ?: "Test alert from SimBridge Gateway")

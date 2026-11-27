@@ -226,7 +226,8 @@ fun MissedCalls(core: LinkCore) {
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (c.number.isNotBlank()) IconButton({
-                        runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL, android.net.Uri.parse("tel:" + c.number))) }
+                        if (io.github.simbridge.Telecom.selfManaged(ctx)) io.github.simbridge.Telecom.call(ctx, c.number)
+                        else runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL, android.net.Uri.parse("tel:" + c.number))) }
                     }) { Icon(Icons.Filled.Call, stringResource(R.string.missed_call_back), tint = Tint.Green) }
                 }
             }
