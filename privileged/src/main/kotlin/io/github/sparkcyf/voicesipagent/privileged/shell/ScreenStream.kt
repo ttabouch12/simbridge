@@ -372,9 +372,12 @@ internal object Clip {
         }.toTypedArray()
     }
 
+    private val getter by lazy { service?.javaClass?.methods?.first { it.name == "getPrimaryClip" } }
+    private val setter by lazy { service?.javaClass?.methods?.first { it.name == "setPrimaryClip" } }
+
     fun get(): String? = runCatching {
         val svc = service ?: return null
-        val m = svc.javaClass.methods.first { it.name == "getPrimaryClip" }
+        val m = getter ?: return null
         val clip = m.invoke(svc, *args(m, null)) as? android.content.ClipData ?: return null
         if (clip.itemCount == 0) null else clip.getItemAt(0).text?.toString()
     }.getOrNull()
@@ -382,7 +385,7 @@ internal object Clip {
     fun set(text: String) {
         runCatching {
             val svc = service ?: return
-            val m = svc.javaClass.methods.first { it.name == "setPrimaryClip" }
+            val m = setter ?: return
             lastSet = text
             m.invoke(svc, *args(m, android.content.ClipData.newPlainText("SimBridge", text)))
         }.onFailure { android.util.Log.w("VsaScreen", "clipboard: ${it.message}") }

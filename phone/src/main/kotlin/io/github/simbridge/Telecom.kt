@@ -19,10 +19,17 @@ object Telecom {
      * Tablets and other devices without Google's Phone app: SimBridge runs its own call screen
      * (a self-managed account, like WhatsApp's). Phones keep the account in the Phone app.
      */
-    fun selfManaged(context: Context): Boolean = runCatching {
-        !context.getSystemService(android.telephony.TelephonyManager::class.java).isVoiceCapable ||
-            context.getSystemService(TelecomManager::class.java).defaultDialerPackage == null
-    }.getOrDefault(false)
+    fun selfManaged(context: Context): Boolean {
+        // Asked on every notification and screen: keep the answer for 30 s (the dialer rarely changes).
+        val now = android.os.SystemClock.elapsedRealtime()
+        cachedSelf?.let { if (now - cachedAt < 30_000) return it }
+        return runCatching {
+            !context.getSystemService(android.telephony.TelephonyManager::class.java).isVoiceCapable ||
+                context.getSystemService(TelecomManager::class.java).defaultDialerPackage == null
+        }.getOrDefault(false).also { cachedSelf = it; cachedAt = now }
+    }
+    @Volatile private var cachedSelf: Boolean? = null
+    @Volatile private var cachedAt = 0L
 
     fun handle(context: Context) =
         PhoneAccountHandle(ComponentName(context, GatewayConnectionService::class.java), if (selfManaged(context)) "simbridge-app" else "simbridge")
@@ -57,7 +64,12 @@ object Telecom {
      * history shows the line. Single SIM: only the plain account.
      */
     fun syncSims(context: Context, sims: List<SimInfo>) {
-        if (selfManaged(context)) return
+        if (selfManaged(context)) {
+            // One account on tablets; remove per-SIM ones an older version registered.
+            if (lastSims != "self") { lastSims = "self"; val tm = context.getSystemService(TelecomManager::class.java)
+                for (slot in 1..2) runCatching { tm.unregisterPhoneAccount(handle(context, slot)) } }
+            return
+        }
         val key = if (sims.size > 1) sims.joinToString { "${it.slot}:${it.carrier}" } else ""
         if (key == lastSims) return
         lastSims = key
@@ -81,6 +93,9 @@ object Telecom {
     fun register(context: Context) {
         val tm = context.getSystemService(TelecomManager::class.java)
         val self = selfManaged(context)
+        // Drop the other kind of account (left over from an older version or a dialer change).
+        runCatching { tm.unregisterPhoneAccount(PhoneAccountHandle(ComponentName(context, GatewayConnectionService::class.java),
+            if (self) "simbridge" else "simbridge-app")) }
         val account = PhoneAccount.builder(handle(context), "SimBridge")
             .setCapabilities(if (self) PhoneAccount.CAPABILITY_SELF_MANAGED else PhoneAccount.CAPABILITY_CALL_PROVIDER)
             .setShortDescription("Calls through your SIM phone")

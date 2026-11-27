@@ -106,7 +106,7 @@
 
         <receiver android:name=".RecordReceiver" android:exported="false" />
         <receiver android:name=".OtpReceiver" android:exported="false" />
-        <service android:name=".HotspotTile" android:exported="true" android:label="@string/dash_hotspot" android:icon="@drawable/ic_link"
+        <service android:name=".HotspotTile" android:exported="true" android:label="@string/hs_title" android:icon="@drawable/ic_link"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
             <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE" android:value="true" />

@@ -288,7 +288,8 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
             else (BatteryMeter.minutesLeft(app) ?: BatteryEstimate.minutesLeft(android.os.SystemClock.elapsedRealtime()))?.let { o.put("batteryMin", it) }
         }
         pingMs?.let { o.put("pingMs", it) }
-        if (System.currentTimeMillis() - pingAt > 20_000) rt.worker { if (checkInternet() != null) send(status()) }
+        // Own thread: a ping can take seconds with no internet and must not hold up USSD or texts.
+        if (System.currentTimeMillis() - pingAt > 20_000) netCheck.execute { if (checkInternet() != null) send(status()) }
         o.put("powerSaver", rt.companionPower.value).put("quiet", rt.quietFlags.value)
         o.put("uptimeMin", SystemClock.elapsedRealtime() / 60_000)
         o.put("version", runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull() ?: "")
@@ -622,9 +623,11 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
     /** Internet on the SIM phone: the last ping to 1.1.1.1 (or Google), in ms; -1 = no internet; null = not checked. */
     @Volatile var pingMs: Int? = null
     @Volatile private var pingAt = 0L
+    private val netCheck = java.util.concurrent.ThreadPoolExecutor(0, 1, 30, java.util.concurrent.TimeUnit.SECONDS,
+        java.util.concurrent.ArrayBlockingQueue(1), java.util.concurrent.ThreadPoolExecutor.DiscardPolicy())
 
     /** Pings 1.1.1.1, then 8.8.8.8, then tries a TCP connection to Google, at most every 20 s. */
-    fun checkInternet(): Int? {
+    @Synchronized fun checkInternet(): Int? {
         if (System.currentTimeMillis() - pingAt < 20_000) return pingMs
         pingAt = System.currentTimeMillis()
         fun ping(host: String): Int? = runCatching {

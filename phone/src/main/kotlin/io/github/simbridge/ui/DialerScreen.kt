@@ -95,6 +95,8 @@ fun DialerScreen(core: LinkCore, initial: String = "", onBack: () -> Unit) {
     var sim by remember { mutableStateOf(0) }
     val ussd by core.control.ussd.collectAsState()
     var ussdBusy by remember { mutableStateOf(false) }
+    // Only replies to codes sent from this page (not one left from the USSD tool earlier).
+    var asked by remember { mutableStateOf(false) }
     LaunchedEffect(ussd) { if (ussd != null) ussdBusy = false }
 
     val digits = number.filter { it.isDigit() }
@@ -108,7 +110,7 @@ fun DialerScreen(core: LinkCore, initial: String = "", onBack: () -> Unit) {
     fun press(c: Char) { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); number += c }
     fun go() {
         if (number.isBlank()) return
-        if (isUssd(number)) { ussdBusy = core.control.ussd(number, sim.takeIf { it > 0 }); return }
+        if (isUssd(number)) { asked = true; ussdBusy = core.control.ussd(number, sim.takeIf { it > 0 }); return }
         Telecom.call(ctx, number)
         onBack()
     }
@@ -138,8 +140,8 @@ fun DialerScreen(core: LinkCore, initial: String = "", onBack: () -> Unit) {
                 }
             }
             // USSD reply, with a box to answer a menu.
-            AnimatedVisibility(ussd != null || ussdBusy, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-                UssdCard(core, ussdBusy) { ussdBusy = it }
+            AnimatedVisibility(asked && (ussd != null || ussdBusy), enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+                UssdCard(core, ussdBusy) { ussdBusy = it; if (!it) asked = false }
             }
             Text(number.ifEmpty { " " }, style = MaterialTheme.typography.displaySmall, textAlign = TextAlign.Center, maxLines = 1,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp))
