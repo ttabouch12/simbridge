@@ -20,6 +20,28 @@ Update both apps. Pairing is kept.
   *Check everything* asks for the full-screen permission when it's needed.
 - **Every contact:** main phones also get the SIM phone's contacts (all its accounts and the SIM
   card) for names and the new-message picker, on top of their own Google contacts.
+- **Dialer like Google's Phone app** (tablets): a full keypad page with letters on the keys,
+  matching contacts as you type, a big green call button and SIM choice on dual-SIM phones.
+  **USSD codes** (`*123#`) typed there run on the SIM phone and their reply (and menus) show on the
+  same page.
+- **Calls ring like WhatsApp** on tablets: full screen when the tablet is locked, a pop-up with
+  Answer and Decline while you use it (or notification only, if you choose). Answering from the
+  pop-up opens the call screen; bigger buttons on the call and translation screens.
+- **Internet status:** next to *Connected*, the SIM phone tab shows whether the SIM phone has
+  internet and its ping to 1.1.1.1 (or Google).
+- **Speed test with fast.com:** both the main phone's and the SIM phone's internet tests now use
+  Netflix's fast.com servers (parallel streams, like the site) and show where the servers are;
+  latency is a real ping to 1.1.1.1.
+- **Battery estimate from the battery's meters:** time left and time to full come from the SIM
+  phone's charge counter and average current, so they show at once, follow real use and survive
+  app restarts. "Fully charged" at 100 %.
+- **Remote screen:** the SIM phone stays upright while controlled (touch didn't line up in
+  landscape) and the clipboard is shared both ways; the paste button types the main phone's
+  clipboard on the SIM phone.
+- **Motion:** rows and tiles spring when pressed, tiles square their corners as you touch them,
+  pages use Material shared-axis and fade-through transitions.
+- Fixes: the internet check no longer holds up USSD or texts; tablets drop calling accounts left
+  by older versions; the call screen stays open while an outgoing call starts.
 - Wi-Fi details work on newer Android without location access.
 - Test call for developers: `adb shell am broadcast -n io.github.simbridge.gateway/io.github.sparkcyf.voicesipagent.app.AdbControlReceiver --es op test-call`
   rings every main phone and echoes your voice back.

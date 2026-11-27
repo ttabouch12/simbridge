@@ -30,7 +30,7 @@ languages, free cloud engines or fully on-device.
 [**⬇ Download the latest release**](../../releases/latest) ·
 [Get it with Obtainium](docs/stores/README.md#obtainium-works-now) ·
 [Compatibility list](docs/COMPATIBILITY.md) ·
-[How it works](#how-it-works) · [Setup](#setup) · [Call translation](#call-translation) · [FAQ & troubleshooting](#troubleshooting) ·
+[How it works](#how-it-works) · [Setup](#setup) · [Tablets](#tablets) · [Call translation](#call-translation) · [FAQ & troubleshooting](#troubleshooting) ·
 [Disclaimer](DISCLAIMER.md)
 
 <p align="center">
@@ -143,9 +143,12 @@ main phone only ever uses Wi-Fi. See the [disclaimer](DISCLAIMER.md).
   on a Google Pixel 11 Pro (Android 17), a Motorola (Android 16) and a Nubia NX769J (Android 16). If calls connect with no sound, see
   [troubleshooting](#troubleshooting).
 
-**Main phone**
-- Android **14 or newer**. Tested on a **Google Pixel 9 (Android 17)**. The system Phone app must
-  support third-party calling accounts (Google Phone does).
+**Main phone or tablet**
+- Android **14 or newer**. Tested on a **Google Pixel 9 (Android 17)** and a **Lenovo Legion Tab
+  (Android 16)**. On phones, calls ring in the system Phone app (it must support third-party calling
+  accounts; Google Phone does). Tablets and other devices without a Phone app get SimBridge's own
+  call screen and dialer.
+- Up to **4 main phones or tablets** at once: scan the same pairing code on each.
 - Same Wi-Fi network as the SIM phone, **or** connected to the SIM phone's hotspot.
 - Google Play services for the QR scanner (or paste the pairing link instead).
 
@@ -306,6 +309,25 @@ adb shell dumpsys deviceidle whitelist +$P
   Opening SimBridge once after a restart avoids it.
 - **After restarting the SIM phone**, everything restarts by itself, including Shizuku with
   thedjchi's version (it needs Wi-Fi on once). You get a text when it's back.
+
+## Tablets
+
+SimBridge works on Android tablets without a SIM or a Phone app (2.9 and newer):
+
+- **Calls** ring like WhatsApp: full screen when the tablet is locked, a pop-up with Answer and
+  Decline while you use it (or notification only: Settings > Calls). The call screen has mute,
+  speaker, keypad and live translation.
+- **Dialer:** Calls > Dial opens a full keypad like Google's Phone app, with contact matching. USSD
+  codes such as `*123#` run on the SIM phone and the reply shows on the same page.
+- **Big-screen layout:** a side rail instead of the bottom bar; in landscape every place is list +
+  detail side by side.
+- **Several main phones:** a phone and a tablet can both be paired. Calls ring on both, texts reach
+  both, and a chat read on one stops notifying on the other.
+
+<p align="center">
+  <img src="docs/images/simbridge-tablet-landscape.png" width="560" alt="Tablet in landscape: SIM phone controls next to Check everything">
+  <img src="docs/images/simbridge-tablet-portrait.png" width="220" alt="Tablet in portrait: side rail and the SIM phone page">
+</p>
 
 ## Limitations
 
