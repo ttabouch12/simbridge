@@ -504,4 +504,11 @@
     <string name="ch_ring">Incoming calls</string>
     <string name="chk_fsi">Full-screen calls</string>
     <string name="chk_fsi_fix">Allow full-screen notifications so calls ring over the lock screen like on a phone.</string>
+    <string name="pane_chat">Choose a conversation, or start a new one</string>
+    <string name="call_alert_title">How calls ring on this device</string>
+    <string name="call_alert_sub">For tablets and devices without a Phone app.</string>
+    <string name="call_alert_full">Full screen</string>
+    <string name="call_alert_full_sub">The call screen opens, even over the lock screen.</string>
+    <string name="call_alert_notif">Notification only</string>
+    <string name="call_alert_notif_sub">A notification with Answer and Decline, like WhatsApp.</string>
 </resources>

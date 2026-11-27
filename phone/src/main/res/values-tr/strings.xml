@@ -503,4 +503,11 @@
     <string name="ch_ring">Gelen aramalar</string>
     <string name="chk_fsi">Tam ekran aramalar</string>
     <string name="chk_fsi_fix">Aramaların kilit ekranında telefondaki gibi çalması için tam ekran bildirimlere izin verin.</string>
+    <string name="pane_chat">Bir sohbet seçin ya da yenisini başlatın</string>
+    <string name="call_alert_title">Aramalar bu cihazda nasıl çalsın</string>
+    <string name="call_alert_sub">Tabletler ve Telefon uygulaması olmayan cihazlar için.</string>
+    <string name="call_alert_full">Tam ekran</string>
+    <string name="call_alert_full_sub">Arama ekranı açılır, kilit ekranının üstünde bile.</string>
+    <string name="call_alert_notif">Yalnızca bildirim</string>
+    <string name="call_alert_notif_sub">WhatsApp\'taki gibi Cevapla ve Reddet içeren bir bildirim.</string>
 </resources>

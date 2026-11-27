@@ -76,6 +76,11 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     io.github.simbridge.ui.ConfirmPairing(core, pendingPair.value) { pendingPair.value = null }
+                    // Big screens: rail + list + detail. Remote control stays full screen.
+                    if (isWide() && s !is Screen.Remote) {
+                        WideHome(core, s) { next -> (next as? Screen.Home)?.let { lastTab = it.tab }; screen.value = next }
+                        return@Surface
+                    }
                     // Going deeper slides in from the side; changing place on the home only fades.
                     AnimatedContent(s, transitionSpec = {
                         if (initialState is Screen.Home && targetState is Screen.Home) fadeIn() togetherWith fadeOut()

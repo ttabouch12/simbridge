@@ -128,6 +128,14 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
             "locate" -> locate(from)
             "voicemail" -> { prefs.edit().putInt("no_answer_sec", o.optInt("seconds").coerceIn(0, 120)).apply(); send(status(), from) }
             "contacts" -> ContactNames.importFromPhone(app, o.optJSONArray("list"))
+            "contacts-get" -> rt.worker {
+                val all = ContactNames.everyNumber(app)
+                val parts = all.chunked(300).ifEmpty { listOf(emptyList()) }
+                parts.forEachIndexed { i, part ->
+                    send(JSONObject().put("op", "contacts-list").put("part", i).put("of", parts.size)
+                        .put("list", JSONArray(part.map { (name, n) -> JSONObject().put("name", name).put("n", n) })), from)
+                }
+            }
             "data-detail" -> send(dataDetail(), from)
             "screen-start" -> screenStart(o.optInt("w", 1080), o.optInt("bitrate", 6_000_000), o.optInt("flags", 1), from)
             "screen-stop" -> privilegedRaw("screen-stop", "")

@@ -43,9 +43,9 @@ import kotlinx.coroutines.withContext
 /** The four places of the app, in bottom-bar order. */
 object Tabs { const val MESSAGES = 0; const val CALLS = 1; const val SIM = 2; const val SETTINGS = 3 }
 
-private data class Dest(val label: Int, val on: ImageVector, val off: ImageVector)
+internal data class Dest(val label: Int, val on: ImageVector, val off: ImageVector)
 
-private val DESTS = listOf(
+internal val DESTS = listOf(
     Dest(R.string.tab_messages, Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat),
     Dest(R.string.tab_calls, Icons.Filled.Call, Icons.Outlined.Call),
     Dest(R.string.tab_sim_phone, Icons.Filled.PhoneAndroid, Icons.Outlined.PhoneAndroid),
@@ -85,14 +85,7 @@ fun HomeScreen(
                     NavigationBarItem(
                         selected = selected,
                         onClick = { scope.launch { pager.animateScrollToPage(i) } },
-                        icon = {
-                            BadgedBox(badge = {
-                                when {
-                                    i == Tabs.MESSAGES && unread > 0 -> Badge { Text(if (unread > 99) "99+" else unread.toString()) }
-                                    i == Tabs.SIM && link.state != LinkState.CONNECTED -> Badge()
-                                }
-                            }) { Icon(if (selected) d.on else d.off, null) }
-                        },
+                        icon = { TabIcon(i, selected, unread, link.state != LinkState.CONNECTED) },
                         label = { Text(stringResource(d.label)) },
                     )
                 }
@@ -110,4 +103,16 @@ fun HomeScreen(
             }
         }
     }
+}
+
+/** A place's icon with its badge: unread count on Messages, a dot on SIM phone when it's offline. */
+@Composable
+internal fun TabIcon(i: Int, selected: Boolean, unread: Int, offline: Boolean) {
+    val d = DESTS[i]
+    BadgedBox(badge = {
+        when {
+            i == Tabs.MESSAGES && unread > 0 -> Badge { Text(if (unread > 99) "99+" else unread.toString()) }
+            i == Tabs.SIM && offline -> Badge()
+        }
+    }) { Icon(if (selected) d.on else d.off, null) }
 }

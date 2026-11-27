@@ -113,7 +113,7 @@ fun DiagnosticsPage(core: LinkCore, s: GatewayStatus?, online: Boolean, onTool: 
             Check(mine != null && !mine.weak, ctx.getString(R.string.chk_wifi),
                 mine?.let { linkText(it) + if (it.weak) "\n" + ctx.getString(R.string.health_weak_sub) else "" } ?: ctx.getString(R.string.health_no_wifi)),
             if (mine?.stuckAx == true) Check(false, ctx.getString(R.string.chk_wifi6), ctx.getString(R.string.chk_wifi6_fix)) else null,
-            if (Telecom.selfManaged(ctx)) Check(ctx.getSystemService(android.app.NotificationManager::class.java).canUseFullScreenIntent(),
+            if (Telecom.selfManaged(ctx) && core.prefs.fullScreenCalls) Check(ctx.getSystemService(android.app.NotificationManager::class.java).canUseFullScreenIntent(),
                 ctx.getString(R.string.chk_fsi), ctx.getString(R.string.chk_fsi_fix),
                 open(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, android.net.Uri.parse("package:" + ctx.packageName))), ctx.getString(R.string.chk_allow))
             else             Check(Telecom.isEnabled(ctx), ctx.getString(R.string.chk_account), ctx.getString(R.string.chk_account_fix),

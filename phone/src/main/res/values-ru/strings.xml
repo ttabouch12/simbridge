@@ -468,4 +468,11 @@
     <string name="ch_ring">Входящие звонки</string>
     <string name="chk_fsi">Звонки на весь экран</string>
     <string name="chk_fsi_fix">Разрешите полноэкранные уведомления, чтобы звонки показывались поверх экрана блокировки, как на телефоне.</string>
+    <string name="pane_chat">Выберите разговор или начните новый</string>
+    <string name="call_alert_title">Как звонки отображаются на этом устройстве</string>
+    <string name="call_alert_sub">Для планшетов и устройств без приложения «Телефон».</string>
+    <string name="call_alert_full">Во весь экран</string>
+    <string name="call_alert_full_sub">Открывается экран звонка, даже поверх экрана блокировки.</string>
+    <string name="call_alert_notif">Только уведомление</string>
+    <string name="call_alert_notif_sub">Уведомление с кнопками «Ответить» и «Отклонить», как в WhatsApp.</string>
 </resources>

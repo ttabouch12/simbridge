@@ -205,7 +205,7 @@ class Notifier(private val context: Context, private val core: LinkCore) {
             .setSmallIcon(R.drawable.ic_link)
             .setStyle(Notification.CallStyle.forIncomingCall(android.app.Person.Builder().setName(name).setImportant(true).build(),
                 act(RecordReceiver.DECLINE, 13), act(RecordReceiver.ANSWER, 14)))
-            .setFullScreenIntent(screen, true)
+            .apply { if (core.prefs.fullScreenCalls) setFullScreenIntent(screen, true) }
             .setContentIntent(screen)
             .setCategory(Notification.CATEGORY_CALL)
             .setOngoing(true)

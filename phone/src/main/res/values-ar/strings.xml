@@ -468,4 +468,11 @@
     <string name="ch_ring">المكالمات الواردة</string>
     <string name="chk_fsi">مكالمات بملء الشاشة</string>
     <string name="chk_fsi_fix">اسمح بالإشعارات بملء الشاشة لتظهر المكالمات فوق شاشة القفل كما في الهاتف.</string>
+    <string name="pane_chat">اختر محادثة أو ابدأ محادثة جديدة</string>
+    <string name="call_alert_title">كيف ترن المكالمات على هذا الجهاز</string>
+    <string name="call_alert_sub">للأجهزة اللوحية والأجهزة التي لا تحتوي على تطبيق الهاتف.</string>
+    <string name="call_alert_full">ملء الشاشة</string>
+    <string name="call_alert_full_sub">تفتح شاشة المكالمة حتى فوق شاشة القفل.</string>
+    <string name="call_alert_notif">إشعار فقط</string>
+    <string name="call_alert_notif_sub">إشعار به رد ورفض، مثل واتساب.</string>
 </resources>

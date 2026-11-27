@@ -468,4 +468,11 @@
     <string name="ch_ring">تماس‌های ورودی</string>
     <string name="chk_fsi">تماس تمام‌صفحه</string>
     <string name="chk_fsi_fix">اعلان‌های تمام‌صفحه را مجاز کنید تا تماس‌ها مثل گوشی روی صفحه قفل نمایش داده شوند.</string>
+    <string name="pane_chat">یک گفتگو انتخاب کنید یا گفتگوی جدیدی شروع کنید</string>
+    <string name="call_alert_title">نحوه زنگ خوردن تماس‌ها در این دستگاه</string>
+    <string name="call_alert_sub">برای تبلت‌ها و دستگاه‌های بدون برنامه تلفن.</string>
+    <string name="call_alert_full">تمام‌صفحه</string>
+    <string name="call_alert_full_sub">صفحه تماس باز می‌شود، حتی روی صفحه قفل.</string>
+    <string name="call_alert_notif">فقط اعلان</string>
+    <string name="call_alert_notif_sub">یک اعلان با پاسخ و رد، مثل واتس‌اپ.</string>
 </resources>

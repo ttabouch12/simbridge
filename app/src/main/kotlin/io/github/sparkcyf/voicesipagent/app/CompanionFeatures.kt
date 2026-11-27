@@ -36,6 +36,31 @@ object ContactNames {
         AppLog.i("contacts: ${o.length()} names from the main phone")
     }
 
+    /**
+     * Every name and number on this phone, for the main phones: contacts from all accounts here
+     * (Samsung, Google, phone storage) plus the SIM card's own list.
+     */
+    fun everyNumber(ctx: Context): List<Pair<String, String>> {
+        if (ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return emptyList()
+        val out = LinkedHashMap<String, Pair<String, String>>()
+        fun add(name: String?, n: String?) {
+            if (name.isNullOrBlank() || n.isNullOrBlank()) return
+            val k = key(n); if (k.length >= 3 && k !in out) out[k] = name.take(80) to n
+        }
+        runCatching {
+            ctx.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, arrayOf(
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)
+                ?.use { c -> while (c.moveToNext()) add(c.getString(0), c.getString(1)) }
+        }
+        runCatching {
+            ctx.contentResolver.query(Uri.parse("content://icc/adn"), null, null, null, null)?.use { c ->
+                val ni = c.getColumnIndex("name"); val pi = c.getColumnIndex("number")
+                if (ni >= 0 && pi >= 0) while (c.moveToNext()) add(c.getString(ni), c.getString(pi))
+            }
+        }
+        return out.values.take(10_000)
+    }
+
     fun lookup(ctx: Context, number: String?): String? {
         if (number.isNullOrBlank()) return null
         val own = ownLookup(ctx, number)

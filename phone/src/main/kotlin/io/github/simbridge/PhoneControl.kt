@@ -143,6 +143,7 @@ class PhoneControl(private val core: LinkCore) {
         when (o.optString("op")) {
             "status" -> _status.value = GatewayStatus.parse(o).also {
                 settle(it)
+                if (!contactsAsked) { contactsAsked = true; send(JSONObject().put("op", "contacts-get")) }
                 Telecom.syncSims(ctx, it.sims)
                 Log.i("SIM phone: battery ${it.battery}% data=${it.dataOn} hotspot=${it.hotspot} saver=${it.powerSaver} " +
                     it.sims.joinToString { s -> "SIM${s.slot} ${s.network} level ${s.level}" })
@@ -158,6 +159,11 @@ class PhoneControl(private val core: LinkCore) {
             "missed", "blocked" -> callEvent(o)
             "mms" -> core.onIncomingMms(o)
             "read" -> core.readElsewhere(o.optString("key"))
+            "contacts-list" -> {
+                if (o.optInt("part") == 0) contactParts = JSONArray()
+                o.optJSONArray("list")?.let { a -> for (i in 0 until a.length()) contactParts.put(a.get(i)) }
+                if (o.optInt("part") >= o.optInt("of", 1) - 1) core.contacts.setSimPhoneContacts(contactParts)
+            }
             "data-detail" -> _dataDetail.value = DataDetail.parse(o)
             "screen-ready" -> _screen.value = ScreenOffer.parse(o)
             "voicemail-msg" -> Voicemails.onMessage(core.context, core, o)
@@ -189,6 +195,10 @@ class PhoneControl(private val core: LinkCore) {
     }
 
     fun refresh() = send(JSONObject().put("op", "status"))
+
+    /** The SIM phone's contacts are fetched once per app start, in parts. */
+    @Volatile private var contactsAsked = false
+    private var contactParts = JSONArray()
 
     /** Tells the other main phones this conversation was read here. */
     fun shareRead(key: String) = send(JSONObject().put("op", "read").put("key", key))

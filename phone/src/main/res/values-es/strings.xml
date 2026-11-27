@@ -468,4 +468,11 @@
     <string name="ch_ring">Llamadas entrantes</string>
     <string name="chk_fsi">Llamadas a pantalla completa</string>
     <string name="chk_fsi_fix">Permite las notificaciones a pantalla completa para que las llamadas suenen sobre la pantalla de bloqueo como en un teléfono.</string>
+    <string name="pane_chat">Elige una conversación o empieza una nueva</string>
+    <string name="call_alert_title">Cómo suenan las llamadas en este dispositivo</string>
+    <string name="call_alert_sub">Para tabletas y dispositivos sin app de Teléfono.</string>
+    <string name="call_alert_full">Pantalla completa</string>
+    <string name="call_alert_full_sub">Se abre la pantalla de llamada, incluso sobre la pantalla de bloqueo.</string>
+    <string name="call_alert_notif">Solo notificación</string>
+    <string name="call_alert_notif_sub">Una notificación con Responder y Rechazar, como en WhatsApp.</string>
 </resources>
