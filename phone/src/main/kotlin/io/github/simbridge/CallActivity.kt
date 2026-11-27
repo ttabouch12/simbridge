@@ -66,7 +66,12 @@ class CallActivity : ComponentActivity() {
         setContent {
             LinkTheme {
                 val ui by ActiveCall.ui.collectAsState()
-                LaunchedEffect(ui) { if (ui == null) finish() }
+                // Close when the call is gone; an outgoing call may appear a moment after this opens.
+                var seen by remember { mutableStateOf(false) }
+                LaunchedEffect(ui) {
+                    if (ui != null) seen = true
+                    else { if (!seen) delay(5000); if (ActiveCall.ui.value == null) finish() }
+                }
                 ui?.let { CallScreen(it) }
             }
         }
