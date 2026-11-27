@@ -29,6 +29,11 @@ class Notifier(private val context: Context, private val core: LinkCore) {
         nm.createNotificationChannel(NotificationChannel(CH_CALL, context.getString(R.string.ch_call), NotificationManager.IMPORTANCE_LOW).apply {
             description = context.getString(R.string.ch_call_d)
         })
+        nm.createNotificationChannel(NotificationChannel(CH_RING, context.getString(R.string.ch_ring), NotificationManager.IMPORTANCE_HIGH).apply {
+            setSound(android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE),
+                android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build())
+            enableVibration(true)
+        })
         nm.createNotificationChannel(NotificationChannel(CH_MISSED, context.getString(R.string.ch_missed), NotificationManager.IMPORTANCE_HIGH).apply {
             description = context.getString(R.string.ch_missed_d)
         })
@@ -171,7 +176,8 @@ class Notifier(private val context: Context, private val core: LinkCore) {
         val action = if (recording) RecordReceiver.STOP else RecordReceiver.START
         val pi = PendingIntent.getBroadcast(context, 11, Intent(context, RecordReceiver::class.java).setAction(action),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val captions = PendingIntent.getActivity(context, 12, Intent(context, CaptionActivity::class.java)
+        val captions = PendingIntent.getActivity(context, 12, Intent(context,
+            if (Telecom.selfManaged(context)) CallActivity::class.java else CaptionActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
         val n = Notification.Builder(context, CH_CALL)
             .setSmallIcon(R.drawable.ic_link)
@@ -187,6 +193,28 @@ class Notifier(private val context: Context, private val core: LinkCore) {
     }
 
     fun cancelInCall() = nm.cancel(ID_CALL)
+
+    /** Tablets: a ringing call with Answer / Decline that opens SimBridge's call screen full screen. */
+    fun incomingCall(who: String) {
+        val name = core.contacts.lookup(who)?.name ?: who.ifBlank { context.getString(R.string.call_unknown) }
+        fun act(a: String, req: Int) = PendingIntent.getBroadcast(context, req, Intent(context, RecordReceiver::class.java).setAction(a),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val screen = PendingIntent.getActivity(context, 15, Intent(context, CallActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
+        val n = Notification.Builder(context, CH_RING)
+            .setSmallIcon(R.drawable.ic_link)
+            .setStyle(Notification.CallStyle.forIncomingCall(android.app.Person.Builder().setName(name).setImportant(true).build(),
+                act(RecordReceiver.DECLINE, 13), act(RecordReceiver.ANSWER, 14)))
+            .setFullScreenIntent(screen, true)
+            .setContentIntent(screen)
+            .setCategory(Notification.CATEGORY_CALL)
+            .setOngoing(true)
+            .build()
+        n.flags = n.flags or Notification.FLAG_INSISTENT
+        runCatching { nm.notify(ID_RING, n) }
+    }
+
+    fun cancelIncoming() = nm.cancel(ID_RING)
 
     fun recordingSaved(who: String, uri: android.net.Uri) {
         val name = core.contacts.lookup(who)?.name ?: who.ifBlank { "call" }
@@ -215,7 +243,10 @@ class Notifier(private val context: Context, private val core: LinkCore) {
         if (number.isNotBlank()) {
             b.setContentIntent(PendingIntent.getActivity(context, number.hashCode(), call, PendingIntent.FLAG_IMMUTABLE))
             b.addAction(Notification.Action.Builder(null, context.getString(R.string.call_back),
-                PendingIntent.getActivity(context, number.hashCode() + 1, call, PendingIntent.FLAG_IMMUTABLE)).build())
+                if (Telecom.selfManaged(context)) PendingIntent.getBroadcast(context, number.hashCode() + 1,
+                    Intent(context, RecordReceiver::class.java).setAction(RecordReceiver.CALL).putExtra("number", number),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                else PendingIntent.getActivity(context, number.hashCode() + 1, call, PendingIntent.FLAG_IMMUTABLE)).build())
             b.addAction(Notification.Action.Builder(null, context.getString(R.string.message),
                 PendingIntent.getActivity(context, number.hashCode() + 2, Intent(context, MainActivity::class.java)
                     .setAction(Intent.ACTION_SENDTO).setData(android.net.Uri.fromParts("smsto", number, null))
@@ -240,10 +271,12 @@ class Notifier(private val context: Context, private val core: LinkCore) {
         const val CH_MIC = "mic"
         const val CH_MISSED = "missed"
         const val CH_CALL = "call"
+        const val CH_RING = "ring"
         const val ID_STATUS = 1
         const val ID_ALERT = 2
         const val ID_MIC = 3
         const val ID_CALL = 4
+        const val ID_RING = 41
 
         val AVATAR_COLORS = intArrayOf(0xFF1A73E8.toInt(), 0xFFD93025.toInt(), 0xFF188038.toInt(), 0xFFE37400.toInt(),
             0xFF9334E6.toInt(), 0xFF007B83.toInt(), 0xFFC5221F.toInt(), 0xFF1967D2.toInt())

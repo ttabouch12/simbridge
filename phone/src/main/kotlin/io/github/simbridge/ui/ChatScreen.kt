@@ -545,8 +545,4 @@ private fun copy(ctx: android.content.Context, text: String) {
     Toast.makeText(ctx, ctx.getString(R.string.copied), Toast.LENGTH_SHORT).show()
 }
 
-fun call(ctx: android.content.Context, number: String) {
-    val granted = ctx.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
-    val i = Intent(if (granted) Intent.ACTION_CALL else Intent.ACTION_DIAL, Uri.fromParts("tel", number, null))
-    runCatching { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-}
+fun call(ctx: android.content.Context, number: String) = io.github.simbridge.Telecom.call(ctx, number)

@@ -121,7 +121,7 @@ fun DiagnosticsPage(core: LinkCore, s: GatewayStatus?, online: Boolean, onTool: 
             Check(perm(android.Manifest.permission.RECORD_AUDIO) && perm(android.Manifest.permission.POST_NOTIFICATIONS), ctx.getString(R.string.chk_perms),
                 ctx.getString(R.string.chk_perms_fix),
                 open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + ctx.packageName))), ctx.getString(R.string.chk_open)),
-            Check(isDefaultSmsApp(ctx).takeIf { it }, ctx.getString(R.string.chk_sms), ctx.getString(R.string.chk_sms_fix), fixText = true),
+            if (!io.github.simbridge.smsRoleAvailable(ctx)) null else Check(isDefaultSmsApp(ctx).takeIf { it }, ctx.getString(R.string.chk_sms), ctx.getString(R.string.chk_sms_fix), fixText = true),
             if (s == null) Check(false, ctx.getString(R.string.chk_sim_phone), ctx.getString(R.string.dash_waiting)) else null,
             s?.let { st ->
                 val low = (st.battery ?: 100) < 20 && !st.charging

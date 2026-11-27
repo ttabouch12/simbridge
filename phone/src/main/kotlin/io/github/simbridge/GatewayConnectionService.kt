@@ -110,9 +110,39 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
         Thread { r.stop()?.let { core.notifier.recordingSaved(who, it) } }.start()
     }
 
+    /** True on tablets: SimBridge shows the call itself instead of the Phone app. */
+    private val ownScreen = Telecom.selfManaged(core.context)
+
     init {
         connectionCapabilities = CAPABILITY_MUTE
         setAudioModeIsVoip(true)
+        if (ownScreen) {
+            connectionProperties = PROPERTY_SELF_MANAGED
+            ActiveCall.shown = this
+            publish(if (incoming) CallUi.State.RINGING else CallUi.State.DIALING)
+        }
+    }
+
+    private fun publish(state: CallUi.State, since: Long = ActiveCall.ui.value?.since ?: 0) {
+        if (!ownScreen || ActiveCall.shown !== this) return
+        val num = leg.remote.number?.takeIf { it.isNotBlank() } ?: leg.target ?: ""
+        val name = leg.remote.displayName?.takeIf { it.isNotBlank() } ?: core.contacts.lookup(num)?.name ?: num
+        ActiveCall.ui.value = CallUi(name, num, incoming, state, since, audio.muted, ActiveCall.ui.value?.speaker == true)
+    }
+
+    /** Ringing on a tablet: a full-screen call notification with Answer and Decline. */
+    override fun onShowIncomingCallUi() {
+        core.notifier.incomingCall(ActiveCall.ui.value?.who ?: label)
+    }
+
+    fun answerFromScreen() { if (leg.state != LegState.CONNECTED) onAnswer() }
+    fun endFromScreen() = if (incoming && leg.state != LegState.CONNECTED) onReject() else onDisconnect()
+    fun toggleMute() { audio.muted = !audio.muted; publish(ActiveCall.ui.value?.state ?: CallUi.State.ACTIVE) }
+    fun dtmf(c: Char) = leg.sendDtmf(c)
+    @Suppress("DEPRECATION")
+    fun setSpeaker(on: Boolean) {
+        setAudioRoute(if (on) android.telecom.CallAudioState.ROUTE_SPEAKER else android.telecom.CallAudioState.ROUTE_WIRED_OR_EARPIECE)
+        ActiveCall.ui.value = ActiveCall.ui.value?.copy(speaker = on)
     }
 
     fun watch() {
@@ -130,6 +160,8 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
                             leg.media?.let(audio::start)
                             startTranslator()
                             ActiveCall.current = this@GatewayConnection
+                            publish(CallUi.State.ACTIVE, System.currentTimeMillis())
+                            core.notifier.cancelIncoming()
                             core.notifier.inCall(label, recording = false)
                             if (core.prefs.autoRecord) startRecording()
                         }
@@ -184,6 +216,12 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
     private fun finish(dc: DisconnectCause) {
         stopRecording()
         if (ActiveCall.current === this) { ActiveCall.current = null; core.notifier.cancelInCall() }
+        if (ActiveCall.shown === this) {
+            publish(CallUi.State.ENDED)
+            ActiveCall.shown = null
+            core.notifier.cancelIncoming()
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ if (ActiveCall.shown == null) ActiveCall.ui.value = null }, 1500)
+        }
         stopRingback()
         bubble?.let { b -> android.os.Handler(android.os.Looper.getMainLooper()).post { b.hide() } }
         bubble = null
@@ -210,19 +248,34 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
 /** The call in progress, for the Record / Stop buttons in the notification. */
 object ActiveCall {
     @Volatile var current: GatewayConnection? = null
+    /** The call shown on SimBridge's own call screen (tablets), or null. */
+    val ui = kotlinx.coroutines.flow.MutableStateFlow<CallUi?>(null)
+    @Volatile var shown: GatewayConnection? = null
 }
+
+/** What SimBridge's own call screen shows. */
+data class CallUi(
+    val who: String, val number: String, val incoming: Boolean, val state: State,
+    val since: Long = 0, val muted: Boolean = false, val speaker: Boolean = false,
+) { enum class State { RINGING, DIALING, ACTIVE, ENDED } }
 
 class RecordReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
-        val c = ActiveCall.current ?: return
         when (intent.action) {
-            START -> c.startRecording()
-            STOP -> c.stopRecording()
+            ANSWER -> { ActiveCall.shown?.answerFromScreen(); CallActivity.open(context) }
+            DECLINE, HANG_UP -> ActiveCall.shown?.endFromScreen()
+            CALL -> intent.getStringExtra("number")?.let { Telecom.call(context, it) }
+            START -> ActiveCall.current?.startRecording()
+            STOP -> ActiveCall.current?.stopRecording()
         }
     }
 
     companion object {
         const val START = "io.github.simbridge.REC_START"
         const val STOP = "io.github.simbridge.REC_STOP"
+        const val ANSWER = "io.github.simbridge.ANSWER"
+        const val DECLINE = "io.github.simbridge.DECLINE"
+        const val HANG_UP = "io.github.simbridge.HANG_UP"
+        const val CALL = "io.github.simbridge.CALL"
     }
 }

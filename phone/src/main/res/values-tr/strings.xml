@@ -488,4 +488,17 @@
     <string name="chk_wifi6">Hotspot\'ta Wi-Fi 6</string>
     <string name="chk_wifi6_fix">Sinyal güçlü ama bu telefon neredeyse veri gönderemiyor. SIM telefonda Hotspot, Gelişmiş\'i açıp Wi-Fi 6\'yı kapatın.</string>
     <string name="hs_title">Hotspot</string>
+    <string name="call_incoming">Gelen arama</string>
+    <string name="call_dialing">Aranıyor…</string>
+    <string name="call_ended">Arama bitti</string>
+    <string name="call_unknown">Bilinmeyen arayan</string>
+    <string name="call_mute">Sessiz</string>
+    <string name="call_speaker">Hoparlör</string>
+    <string name="call_keypad">Tuş takımı</string>
+    <string name="call_answer">Cevapla</string>
+    <string name="call_decline">Reddet</string>
+    <string name="call_end">Kapat</string>
+    <string name="dial_title">SIM telefon üzerinden ara</string>
+    <string name="dial_call">Ara</string>
+    <string name="ch_ring">Gelen aramalar</string>
 </resources>

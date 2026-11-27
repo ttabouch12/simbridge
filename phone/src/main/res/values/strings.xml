@@ -489,4 +489,17 @@
     <string name="chk_wifi6">Wi-Fi 6 on the hotspot</string>
     <string name="chk_wifi6_fix">Strong signal but this phone can barely send. On the SIM phone open Hotspot, Advanced and turn off Wi-Fi 6.</string>
     <string name="hs_title">Hotspot</string>
+    <string name="call_incoming">Incoming call</string>
+    <string name="call_dialing">Calling…</string>
+    <string name="call_ended">Call ended</string>
+    <string name="call_unknown">Unknown caller</string>
+    <string name="call_mute">Mute</string>
+    <string name="call_speaker">Speaker</string>
+    <string name="call_keypad">Keypad</string>
+    <string name="call_answer">Answer</string>
+    <string name="call_decline">Decline</string>
+    <string name="call_end">Hang up</string>
+    <string name="dial_title">Call through your SIM phone</string>
+    <string name="dial_call">Call</string>
+    <string name="ch_ring">Incoming calls</string>
 </resources>

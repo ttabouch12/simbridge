@@ -99,6 +99,8 @@ class GatewayControl(private val app: Context, private val rt: GatewayRuntime) {
             }
             "report" -> prefs.edit().putBoolean("daily_report", o.optBoolean("on", true)).apply()
             "status" -> send(status(), from)
+            // A main phone read a conversation: tell every main phone, so the others drop its notification.
+            "read" -> send(JSONObject().put("op", "read").put("key", o.optString("key").take(200)))
             "ussd" -> ussd(o.optString("code"), o.optInt("sim", 0).takeIf { it > 0 }, from)
             "ussd-reply" -> rt.worker { ussdReply("", privilegedRaw("ussd-reply", o.optString("text").take(40)), from) }
             "ussd-cancel" -> rt.worker { privilegedRaw("ussd-cancel", "") }

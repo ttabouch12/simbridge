@@ -453,4 +453,17 @@
     <string name="chk_wifi6">Wi-Fi 6 на точке доступа</string>
     <string name="chk_wifi6_fix">Сигнал сильный, но этот телефон почти не может отправлять. На SIM-телефоне откройте Точка доступа, Дополнительно и выключите Wi-Fi 6.</string>
     <string name="hs_title">Точка доступа</string>
+    <string name="call_incoming">Входящий звонок</string>
+    <string name="call_dialing">Вызов…</string>
+    <string name="call_ended">Звонок завершён</string>
+    <string name="call_unknown">Неизвестный номер</string>
+    <string name="call_mute">Без звука</string>
+    <string name="call_speaker">Динамик</string>
+    <string name="call_keypad">Клавиатура</string>
+    <string name="call_answer">Ответить</string>
+    <string name="call_decline">Отклонить</string>
+    <string name="call_end">Завершить</string>
+    <string name="dial_title">Позвонить через SIM-телефон</string>
+    <string name="dial_call">Позвонить</string>
+    <string name="ch_ring">Входящие звонки</string>
 </resources>

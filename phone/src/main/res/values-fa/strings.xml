@@ -453,4 +453,17 @@
     <string name="chk_wifi6">وای‌فای ۶ روی هات‌اسپات</string>
     <string name="chk_wifi6_fix">آنتن قوی است اما این گوشی به‌سختی ارسال می‌کند. در گوشی سیم‌کارت هات‌اسپات، پیشرفته را باز کنید و وای‌فای ۶ را خاموش کنید.</string>
     <string name="hs_title">هات‌اسپات</string>
+    <string name="call_incoming">تماس ورودی</string>
+    <string name="call_dialing">در حال تماس…</string>
+    <string name="call_ended">تماس پایان یافت</string>
+    <string name="call_unknown">تماس‌گیرنده ناشناس</string>
+    <string name="call_mute">بی‌صدا</string>
+    <string name="call_speaker">بلندگو</string>
+    <string name="call_keypad">صفحه‌کلید</string>
+    <string name="call_answer">پاسخ</string>
+    <string name="call_decline">رد کردن</string>
+    <string name="call_end">قطع تماس</string>
+    <string name="dial_title">تماس از طریق گوشی سیم‌کارت</string>
+    <string name="dial_call">تماس</string>
+    <string name="ch_ring">تماس‌های ورودی</string>
 </resources>

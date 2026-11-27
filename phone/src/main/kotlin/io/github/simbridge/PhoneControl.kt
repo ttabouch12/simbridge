@@ -157,6 +157,7 @@ class PhoneControl(private val core: LinkCore) {
             "sms-status" -> smsStatus(o.optString("ref"), o.optString("status"))
             "missed", "blocked" -> callEvent(o)
             "mms" -> core.onIncomingMms(o)
+            "read" -> core.readElsewhere(o.optString("key"))
             "data-detail" -> _dataDetail.value = DataDetail.parse(o)
             "screen-ready" -> _screen.value = ScreenOffer.parse(o)
             "voicemail-msg" -> Voicemails.onMessage(core.context, core, o)
@@ -188,6 +189,9 @@ class PhoneControl(private val core: LinkCore) {
     }
 
     fun refresh() = send(JSONObject().put("op", "status"))
+
+    /** Tells the other main phones this conversation was read here. */
+    fun shareRead(key: String) = send(JSONObject().put("op", "read").put("key", key))
 
     /** Answers a USSD menu (the reply goes into the SIM phone's USSD dialog). */
     fun ussdReply(text: String): Boolean { _ussd.value = null; return send(JSONObject().put("op", "ussd-reply").put("text", text)) }

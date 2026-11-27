@@ -58,7 +58,13 @@ fun CallsScreen(core: LinkCore, onTool: (Tool) -> Unit, onSettings: (Int) -> Uni
             voicemails = core.store.voicemails(10)
         }
     }
-    fun dial(number: String) = runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", number, null))) }
+    val own = remember { io.github.simbridge.Telecom.selfManaged(ctx) }
+    var dialing by remember { mutableStateOf(false) }
+    fun dial(number: String) {
+        if (own) io.github.simbridge.Telecom.call(ctx, number)
+        else runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", number, null))) }
+    }
+    if (dialing) DialDialog(onCall = { dial(it) }, onDismiss = { dialing = false })
 
     Box(Modifier.fillMaxSize()) {
         PageScaffold(stringResource(R.string.tab_calls), onBack = null) {
@@ -101,7 +107,7 @@ fun CallsScreen(core: LinkCore, onTool: (Tool) -> Unit, onSettings: (Int) -> Uni
             VSpace(80.dp)
         }
         ExtendedFloatingActionButton(
-            onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL)) } },
+            onClick = { if (own) dialing = true else runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL)) } },
             icon = { Icon(Icons.Filled.Dialpad, null) }, text = { Text(stringResource(R.string.calls_dial)) },
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
         )

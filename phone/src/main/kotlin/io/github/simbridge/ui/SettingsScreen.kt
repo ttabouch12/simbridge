@@ -219,15 +219,16 @@ fun SettingsScreen(core: LinkCore, section: Int? = null, onSection: (Int?) -> Un
                 TranslationCard(core)
                 NavRow(Icons.Filled.Warning, stringResource(R.string.blocked_title), stringResource(R.string.blocked_sub), onBlocked)
             }
+            val smsRoleOk = remember { io.github.simbridge.smsRoleAvailable(ctx) }
             if (tab == 2) {
-                Card(Icons.Filled.Sms, stringResource(R.string.set_sms),
+                if (smsRoleOk) Card(Icons.Filled.Sms, stringResource(R.string.set_sms),
                     if (smsDefault) stringResource(R.string.set_sms_on)
                     else stringResource(R.string.set_sms_off),
                     ok = true) {
                     if (!smsDefault) FilledTonalButton({ smsRole.launch(ctx.getSystemService(android.app.role.RoleManager::class.java)
                         .createRequestRoleIntent(android.app.role.RoleManager.ROLE_SMS)) }) { Text(stringResource(R.string.set_sms_make)) }
                 }
-                if (!smsDefault) Card(Icons.Filled.Sms, stringResource(R.string.set_mirror),
+                if (smsRoleOk && !smsDefault) Card(Icons.Filled.Sms, stringResource(R.string.set_mirror),
                     when {
                         !mirrorOn -> stringResource(R.string.set_mirror_off)
                         mirrorOk -> stringResource(R.string.set_mirror_on)

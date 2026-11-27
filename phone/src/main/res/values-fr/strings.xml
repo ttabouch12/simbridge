@@ -453,4 +453,17 @@
     <string name="chk_wifi6">Wi-Fi 6 sur le point d\'accès</string>
     <string name="chk_wifi6_fix">Bon signal, mais ce téléphone envoie à peine. Sur le téléphone SIM, ouvrez Point d\'accès, Avancé et désactivez le Wi-Fi 6.</string>
     <string name="hs_title">Point d\'accès</string>
+    <string name="call_incoming">Appel entrant</string>
+    <string name="call_dialing">Appel en cours…</string>
+    <string name="call_ended">Appel terminé</string>
+    <string name="call_unknown">Appelant inconnu</string>
+    <string name="call_mute">Muet</string>
+    <string name="call_speaker">Haut-parleur</string>
+    <string name="call_keypad">Clavier</string>
+    <string name="call_answer">Répondre</string>
+    <string name="call_decline">Refuser</string>
+    <string name="call_end">Raccrocher</string>
+    <string name="dial_title">Appeler via le téléphone SIM</string>
+    <string name="dial_call">Appeler</string>
+    <string name="ch_ring">Appels entrants</string>
 </resources>

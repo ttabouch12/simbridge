@@ -1,5 +1,20 @@
 # Changelog
 
+## SimBridge 2.9.0
+
+Update both apps. Pairing is kept.
+
+- **Tablets as main phones (Android 14+):** on a tablet or any device without Google's Phone
+  app, SimBridge now rings with its own full-screen call screen (answer, decline, mute, speaker,
+  keypad, translation) and has its own dial pad in the Calls tab. Texts work without being the
+  default texting app; the settings that need one are hidden there. The app no longer asks the
+  store for phone hardware.
+- **Read on one, quiet on all:** with several main phones paired, opening or marking a chat read on
+  one phone marks it read on the others and clears their notification. Needs the 2.9 SimBridge
+  Gateway on the SIM phone.
+- Up to 4 phones and tablets can be paired at once (scan the same pairing code on each); calls
+  ring on all of them and texts reach all of them.
+
 ## SimBridge 2.8.0
 
 Update both apps. Pairing is kept. This release includes the 2.7 redesign, which was not released on its own.

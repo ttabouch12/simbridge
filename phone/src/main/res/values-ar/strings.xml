@@ -453,4 +453,17 @@
     <string name="chk_wifi6">Wi-Fi 6 على نقطة الاتصال</string>
     <string name="chk_wifi6_fix">الإشارة قوية لكن هذا الهاتف بالكاد يرسل. على هاتف SIM افتح نقطة الاتصال، خيارات متقدمة وأوقف Wi-Fi 6.</string>
     <string name="hs_title">نقطة الاتصال</string>
+    <string name="call_incoming">مكالمة واردة</string>
+    <string name="call_dialing">جارٍ الاتصال…</string>
+    <string name="call_ended">انتهت المكالمة</string>
+    <string name="call_unknown">متصل غير معروف</string>
+    <string name="call_mute">كتم</string>
+    <string name="call_speaker">مكبر الصوت</string>
+    <string name="call_keypad">لوحة الأرقام</string>
+    <string name="call_answer">رد</string>
+    <string name="call_decline">رفض</string>
+    <string name="call_end">إنهاء</string>
+    <string name="dial_title">اتصل عبر هاتف SIM</string>
+    <string name="dial_call">اتصال</string>
+    <string name="ch_ring">المكالمات الواردة</string>
 </resources>
