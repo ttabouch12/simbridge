@@ -507,7 +507,7 @@
     <string name="call_alert_title">Aramalar bu cihazda nasıl çalsın</string>
     <string name="call_alert_sub">Tabletler ve Telefon uygulaması olmayan cihazlar için.</string>
     <string name="call_alert_full">Kilitliyken tam ekran</string>
-    <string name="call_alert_full_sub">Kilitliyken arama ekranı açılır. Kullanırken WhatsApp'taki gibi Cevapla ve Reddet içeren bir açılır bildirim.</string>
+    <string name="call_alert_full_sub">Kilitliyken arama ekranı açılır. Kullanırken WhatsApp\'taki gibi Cevapla ve Reddet içeren bir açılır bildirim.</string>
     <string name="call_alert_notif">Yalnızca bildirim</string>
     <string name="call_alert_notif_sub">WhatsApp\'taki gibi Cevapla ve Reddet içeren bir bildirim.</string>
     <string name="close">Kapat</string>
