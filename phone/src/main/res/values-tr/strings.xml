@@ -501,4 +501,6 @@
     <string name="dial_title">SIM telefon üzerinden ara</string>
     <string name="dial_call">Ara</string>
     <string name="ch_ring">Gelen aramalar</string>
+    <string name="chk_fsi">Tam ekran aramalar</string>
+    <string name="chk_fsi_fix">Aramaların kilit ekranında telefondaki gibi çalması için tam ekran bildirimlere izin verin.</string>
 </resources>

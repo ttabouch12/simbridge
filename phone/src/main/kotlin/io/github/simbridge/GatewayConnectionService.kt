@@ -133,6 +133,9 @@ class GatewayConnection(private val core: LinkCore, private val leg: CallLeg, pr
     /** Ringing on a tablet: a full-screen call notification with Answer and Decline. */
     override fun onShowIncomingCallUi() {
         core.notifier.incomingCall(ActiveCall.ui.value?.who ?: label)
+        // Without the full-screen permission Android only shows a small notification: open the
+        // call screen directly (works while SimBridge is on screen).
+        if (!core.context.getSystemService(android.app.NotificationManager::class.java).canUseFullScreenIntent()) CallActivity.open(core.context)
     }
 
     fun answerFromScreen() { if (leg.state != LegState.CONNECTED) onAnswer() }

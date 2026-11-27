@@ -502,4 +502,6 @@
     <string name="dial_title">Call through your SIM phone</string>
     <string name="dial_call">Call</string>
     <string name="ch_ring">Incoming calls</string>
+    <string name="chk_fsi">Full-screen calls</string>
+    <string name="chk_fsi_fix">Allow full-screen notifications so calls ring over the lock screen like on a phone.</string>
 </resources>

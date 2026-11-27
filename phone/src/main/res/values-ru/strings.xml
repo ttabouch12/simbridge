@@ -466,4 +466,6 @@
     <string name="dial_title">Позвонить через SIM-телефон</string>
     <string name="dial_call">Позвонить</string>
     <string name="ch_ring">Входящие звонки</string>
+    <string name="chk_fsi">Звонки на весь экран</string>
+    <string name="chk_fsi_fix">Разрешите полноэкранные уведомления, чтобы звонки показывались поверх экрана блокировки, как на телефоне.</string>
 </resources>

@@ -466,4 +466,6 @@
     <string name="dial_title">Llamar a través del teléfono SIM</string>
     <string name="dial_call">Llamar</string>
     <string name="ch_ring">Llamadas entrantes</string>
+    <string name="chk_fsi">Llamadas a pantalla completa</string>
+    <string name="chk_fsi_fix">Permite las notificaciones a pantalla completa para que las llamadas suenen sobre la pantalla de bloqueo como en un teléfono.</string>
 </resources>

@@ -466,4 +466,6 @@
     <string name="dial_title">Appeler via le téléphone SIM</string>
     <string name="dial_call">Appeler</string>
     <string name="ch_ring">Appels entrants</string>
+    <string name="chk_fsi">Appels en plein écran</string>
+    <string name="chk_fsi_fix">Autorisez les notifications en plein écran pour que les appels sonnent sur l\'écran verrouillé comme sur un téléphone.</string>
 </resources>

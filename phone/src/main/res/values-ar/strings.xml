@@ -466,4 +466,6 @@
     <string name="dial_title">اتصل عبر هاتف SIM</string>
     <string name="dial_call">اتصال</string>
     <string name="ch_ring">المكالمات الواردة</string>
+    <string name="chk_fsi">مكالمات بملء الشاشة</string>
+    <string name="chk_fsi_fix">اسمح بالإشعارات بملء الشاشة لتظهر المكالمات فوق شاشة القفل كما في الهاتف.</string>
 </resources>

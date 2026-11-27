@@ -466,4 +466,6 @@
     <string name="dial_title">تماس از طریق گوشی سیم‌کارت</string>
     <string name="dial_call">تماس</string>
     <string name="ch_ring">تماس‌های ورودی</string>
+    <string name="chk_fsi">تماس تمام‌صفحه</string>
+    <string name="chk_fsi_fix">اعلان‌های تمام‌صفحه را مجاز کنید تا تماس‌ها مثل گوشی روی صفحه قفل نمایش داده شوند.</string>
 </resources>
