@@ -466,8 +466,14 @@ data class WifiLink(val ssid: String, val freq: Int, val rssi: Int, val tx: Int,
     companion object {
         /** This phone's own Wi-Fi link, or null when not on Wi-Fi. */
         fun local(ctx: android.content.Context): WifiLink? = runCatching {
-            @Suppress("DEPRECATION") val i = ctx.applicationContext.getSystemService(android.net.wifi.WifiManager::class.java).connectionInfo
-            if (i == null || i.networkId == -1) null
+            // The active network's Wi-Fi details; the old connectionInfo is hidden on newer Android without location.
+            val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
+            val fromNet = cm.allNetworks.firstNotNullOfOrNull { n ->
+                cm.getNetworkCapabilities(n)?.takeIf { it.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) }
+                    ?.transportInfo as? android.net.wifi.WifiInfo
+            }
+            @Suppress("DEPRECATION") val i = fromNet ?: ctx.applicationContext.getSystemService(android.net.wifi.WifiManager::class.java).connectionInfo
+            if (i == null || (i.networkId == -1 && i.frequency <= 0)) null
             else WifiLink(i.ssid.trim('"'), i.frequency, i.rssi, i.txLinkSpeedMbps, i.rxLinkSpeedMbps, i.wifiStandard)
         }.getOrNull()
 

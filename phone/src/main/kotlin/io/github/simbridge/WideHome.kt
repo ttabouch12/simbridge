@@ -77,6 +77,8 @@ fun WideHome(core: LinkCore, s: Screen, go: (Screen) -> Unit) {
     LaunchedEffect(version) { unread = withContext(Dispatchers.IO) { core.store.conversations().count { it.unread > 0 && !it.archived } } }
     val width = LocalConfiguration.current.screenWidthDp
     val listWidth = if (width >= 1000) 420.dp else 360.dp
+    // Side by side from 840 dp (landscape tablets); portrait tablets get the rail and one page at a time.
+    val twoPane = width >= 840
 
     Row(Modifier.fillMaxSize()) {
         NavigationRail(Modifier.fillMaxHeight().padding(top = 24.dp)) {
@@ -93,7 +95,7 @@ fun WideHome(core: LinkCore, s: Screen, go: (Screen) -> Unit) {
             Spacer(Modifier.weight(1f))
         }
         VerticalDivider()
-        Box(Modifier.width(listWidth).fillMaxHeight()) {
+        if (twoPane || s is Screen.Home) Box(if (twoPane) Modifier.width(listWidth).fillMaxHeight() else Modifier.weight(1f).fillMaxHeight()) {
             when (tab) {
                 Tabs.MESSAGES -> ConversationsScreen(core, { k, a -> go(Screen.Chat(k, a)) }, { go(Screen.NewChat) }) { go(Screen.Settings(2)) }
                 Tabs.CALLS -> CallsScreen(core, { go(Screen.Tool(it)) }, { go(Screen.Settings(it)) }, { go(Screen.Blocked) }) { k, a -> go(Screen.Chat(k, a)) }
@@ -101,8 +103,9 @@ fun WideHome(core: LinkCore, s: Screen, go: (Screen) -> Unit) {
                 else -> SettingsScreen(core, null, { sec -> sec?.let { go(Screen.Settings(it)) } })
             }
         }
-        VerticalDivider()
-        Surface(Modifier.weight(1f).fillMaxHeight(), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        if (twoPane) VerticalDivider()
+        if (twoPane || s !is Screen.Home) Surface(Modifier.weight(1f).fillMaxHeight(),
+            color = if (twoPane) MaterialTheme.colorScheme.surfaceContainerLow else MaterialTheme.colorScheme.surface) {
             val back = { go(Screen.Home(tab)) }
             // The detail: what the screen points at, or a sensible default for the place.
             val detail = if (s is Screen.Home) when (tab) {
