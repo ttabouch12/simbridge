@@ -1,5 +1,6 @@
 package io.github.simbridge
 
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.foundation.layout.height
 import android.os.Bundle
 import android.view.WindowManager
@@ -64,7 +65,7 @@ internal fun ModeChips(large: Boolean = false) {
         // Full page: one big segmented control, easy to hit during a call.
         androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             modes.forEachIndexed { i, (m, label) ->
-                androidx.compose.material3.SegmentedButton(
+                SegmentedButton(
                     selected = Captions.mode == m, onClick = { call?.translator?.mode = m }, enabled = call != null,
                     shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, modes.size),
                     modifier = Modifier.height(56.dp),
